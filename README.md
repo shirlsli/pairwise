@@ -29,6 +29,8 @@ pip install -e .
 [data folder] https://drive.google.com/drive/folders/1Uu0YZSxX8GQtV_4ZJmsMrbanmse-Dq6n?usp=sharing/ 
 ```
 If you are using Mac M1 chip, we recommend checking out this [github issue for installation of required dependencies](https://github.com/rusty1s/pytorch_scatter/issues/241)
+
+If you are using a Windows computer, it's recommended to use WSL 2 and whichever Linux distribution you prefer to minimize changes to the `environment.yml` file. When running `conda env create --name pairwise --file=environment.yml`, use the `environment.yml` file linked [here](https://github.com/shirlsli/pairwise/blob/main/environment.yml). If you have a NVIDIA GPU, then follow these [steps](https://docs.nvidia.com/cuda/wsl-user-guide/index.html#getting-started-with-cuda-on-wsl-2) to install the CUDA Toolkit before installing PyTorch. 
 ****
 
 #### Getting strarted
