@@ -30,13 +30,15 @@ pip install -e .
 ```
 If you are using Mac M1 chip, we recommend checking out this [github issue for installation of required dependencies](https://github.com/rusty1s/pytorch_scatter/issues/241)
 
-If you are using a Windows computer, it's recommended to use WSL 2 and whichever Linux distribution you prefer to minimize changes to the `environment.yml` file. When running `conda env create --name pairwise --file=environment.yml`, use the `environment.yml` file linked [here](https://github.com/shirlsli/pairwise/blob/main/environment.yml). If you have a NVIDIA GPU, then follow these [steps](https://docs.nvidia.com/cuda/wsl-user-guide/index.html#getting-started-with-cuda-on-wsl-2) to install the CUDA Toolkit before installing PyTorch. 
+If you are using a Windows machine, it's recommended to use WSL 2 and whichever Linux distribution you prefer to minimize changes to the `environment.yml` file. When running `conda env create --name pairwise --file=environment.yml`, use the `environment.yml` file linked [here](https://github.com/shirlsli/pairwise/blob/main/environment.yml). 
+
+You also may need to uncomment this [line](https://github.com/shirlsli/pairwise/blob/main/pairwise/prepare_data.py#L381) on your first run to create the required `proessed_dpi.csv` file.
 ****
 
 #### Getting strarted
 
 ```bash
- python pairwise/main.py --model 'deepsynergy_preuer' --synergy_df 'p13' --train_test_mode train
+python pairwise/main.py --model 'deepsynergy_preuer' --synergy_df 'p13' --train_test_mode train
 ```
 
 #### Features explained
