@@ -46,7 +46,7 @@ def prepare_data(args):
 
     # Cleaning synergy data. Drugs not in drug–target interaction(DTI) are removed
     selected_drugs = get_drug(drugFeature_dicts, drugset)
-    print("\ndrug features contructed")
+    print("\ndrug features constructed")
 
     # Cleaning synergy data. Cells not having top variance genes are removed
     ## Cell feats: multi-omics dataset / get_cell select top genes by variance or kegg pathway
@@ -58,7 +58,7 @@ def prepare_data(args):
         np.savetxt(save_path, np.array(selected_genes).astype(int), delimiter=',')
 
     elif args.cell_omics[0] == 'GNN_cell':
-        #这里load了更多的cell
+        # this loads more cells
         # cell_feats, selected_cells = cellFeatures_dicts, get_GNNCell()
         cell_feats, selected_cells = cellFeatures_dicts, get_GNNCell(cellFeatures_dicts, cellset)
 
@@ -82,7 +82,7 @@ def prepare_data(args):
             row = synergy_df.iloc[i]
             X_cell[i,:] = cell_feats[row['cell']].values
 
-        # 这里对于hetergnn, 只return cell line name
+        # specific to hetergnn only returns cell line name
         if config['model_name'] == "hetergnn":
             pesduoX_cell = []
             for i in tqdm(range(synergy_df.shape[0])):

@@ -378,7 +378,7 @@ def load_drug_features():
         
         proessed_dpi = pd.DataFrame(target_feats)
         proessed_dpi.index = drug_targets_L['NCBI_ID'].unique()
-        # proessed_dpi.to_csv(os.path.join(ROOT_DIR, 'results','proessed_dpi_db.csv'))
+        # proessed_dpi.to_csv(os.path.join(ROOT_DIR, 'results','proessed_dpi.csv'))
 
         # network = nx.read_edgelist(os.path.join(ROOT_DIR, 'data','cell_line_data','PPI','string_network'), delimiter='\t', nodetype=int,
         #                    data=(('weight', float),))
@@ -626,7 +626,7 @@ def load_drug_features():
         # data_dicts = np.load(open(os.path.join(ROOT_DIR, 'data copy', 'drug_data', 'input_drug_data.npy'), 'rb'),allow_pickle=True).item()
         with open(save_path, 'rb') as file:
             data_dicts = np.load(file, allow_pickle=True)
-            data_dicts = data_dicts.item()
+            data_dicts = data_dicts.item() if hasattr(data_dicts, 'item') else data_dicts
         # data_dicts['smiles_grover'] = process_smilesGrover()
         data_dicts['drug_target'] = process_dpi()
         # data_dicts['drug_target_rwr'] = process_dpi_RWR()

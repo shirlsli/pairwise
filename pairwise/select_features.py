@@ -89,7 +89,8 @@ def get_cell(cellFeature_dicts, synergy_cellset, cell_omics, cell_filtered_by, m
         var_df = processed_data.var(axis=1)
         selected_genes = list(var_df.sort_values(ascending=False).iloc[:1000].index)
         with open(os.path.join(ROOT_DIR, 'data', 'drug_data','input_drug_data.npy'), 'rb') as file:
-            data_dicts = np.load(file, allow_pickle=True).item()
+            data = np.load(file, allow_pickle=True)
+            data_dicts = data.item() if hasattr(data, 'item') else data
 
         drug_target = list(data_dicts['drug_target'].index)
 

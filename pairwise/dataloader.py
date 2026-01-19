@@ -253,6 +253,7 @@ def k_fold_trainer(dataset,model,args):
     saveddf = pd.DataFrame(np.column_stack([meta_clf_index,meta_clf_acts,meta_clf_pred]),\
                 columns=['index','actuals','metapredicts_%s' % args.model])
     save_path = os.path.join(ROOT_DIR, 'results','meta_clf','metapredicts_%s_%s.txt' % (args.model, args.synergy_df))
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     saveddf.to_csv(save_path, header=True, index=True, sep=",")
 
     return network_weights
