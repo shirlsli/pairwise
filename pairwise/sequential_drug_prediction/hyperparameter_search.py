@@ -9,7 +9,6 @@ def objective(trial, train_data, val_data, device):
     Returns validation metric to minimize (negative PCC since
     Optuna minimizes by default).
     """
-    # Define hyperparameter search space
     hidden_size    = trial.suggest_categorical('hidden_size', [64, 128, 256])
     num_heads      = trial.suggest_categorical('num_heads', [4, 8])
     ctl_structure  = trial.suggest_categorical('ctl_structure', ['SA', 'SA+SA', 'SA+SA+SA'])
@@ -18,7 +17,7 @@ def objective(trial, train_data, val_data, device):
     mse_weight     = trial.suggest_float('mse_weight', 0.5, 2.0)
     pcc_weight     = trial.suggest_float('pcc_weight', 0.5, 5.0)
     drug_hidden_dim = trial.suggest_categorical('drug_hidden_dim', [256, 512, 1024])
-    dropout        = trial.suggest_float('dropout', 0.0, 0.3)
+    dropout        = trial.suggest_float('dropout', 0.1, 0.3)
 
     train_dataset = PerturbationDataset(
         fingerprints=train_data['drug_fp'],
