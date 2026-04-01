@@ -83,18 +83,26 @@ In the cross-attention layers, the cell representation is treated as the query, 
 I wasn't totally sure which parameters to choose, so I had Claude generate hyperparameter choices.
 
 **hidden_size**: [64, 128, 256]
+
 **num_heads**: [4, 8]
+
 **ctl_structure**: ['SA', 'SA+SA', 'SA+SA+SA'] (number of self-attention layers)
+
 **trt_structure**: ['CA+SA', 'CA+SA+CA', 'CA+SA+CA+SA'] (layer structure, cross attention = CA, SA = self-attention, XPert's default is CA+SA+CA.)
+
 **learning_rate**: [1e-4, 1e-2]
+
 **mse_weight**: [0.5, 2.0]
+
 **pcc_weight**: [0.5, 5.0]
+
 **drug_hidden_dim**: [256, 512, 1024]
+
 **dropout**: [0.1, 0.3]
 
 I've submitted a bash script `model_comparison.sh` to SLURM and am waiting for it to be allocated a node. Running on CPU may take a long time.
 
-#### Citations
+## Citations
 
 Chen, X., Deng, Y., Yang, X. et al. Reinforcement learning-based design of sequential drug treatment targeting the evolving tumour landscape with SequenTx. Nat Mach Intell 8, 351–371 (2026). https://doi.org/10.1038/s42256-026-01192-1
 
