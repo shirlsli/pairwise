@@ -204,6 +204,7 @@ def preprocess_data(args):
         file_path=ensure_decompressed(args.drug_info_path), # '../../data/perturbation_data/GSE92742_Broad_LINCS_pert_info.txt.gz'
         pert_ids=perts['pert_id'].unique()
     )
+
     perts = perts[perts["pert_id"].isin(drugs_df["pert_id"])]
     print(f"Finished converting drug SMILES to {drug_format} fingerprints! {len(perts)} perturbations remaining.")
     return load_lincs_data(gctx_path, perts, drugs_df, landmark_genes, args, inst_info_all)
@@ -266,3 +267,12 @@ def load_lincs_data(gctx_path, filtered_perts, drugs_df, landmark_genes, args, i
         }, f)
     print('Finished constructing control-treatment pairs and corresponding drug fingerprints! Saved to {}'.format(save_path))
     return landmark_genes_col
+
+def check_cell_types():
+    with open('/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/perturbation_data/processed_lincs_6_24_hrs_9-11_uM_cell_baseline_consensus_collapsed.pkl', 'rb') as f:
+        data = pickle.load(f)
+    cell_ids = data['cell_ids']
+    num_cell_id = np.unique(cell_ids).size
+    print(f"Number of unique cell lines: {num_cell_id}")
+    print("Unique cell lines:")
+    print(np.unique(cell_ids))

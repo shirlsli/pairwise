@@ -1,4 +1,3 @@
-from sklearn.preprocessing import StandardScaler
 import pickle
 import pandas as pd
 from geode import *
@@ -205,7 +204,7 @@ def train_val_test_split(preprocessed_save_path, args, landmark_gene_ids):
     proxy_train_mask = ~np.isin(drug_names, folds_preview[0])
     proxy_train_control = normalized_data['control_pair'][proxy_train_mask]
 
-    bin_edges = compute_bin_edges(proxy_train_control, n_bins=64)
+    bin_edges = compute_bin_edges(proxy_train_control, n_bins=args.n_bins)
     normalized_data['control_pair_binned'] = apply_binning(
         normalized_data['control_pair'], bin_edges
     )
@@ -224,8 +223,11 @@ def train_val_test_split(preprocessed_save_path, args, landmark_gene_ids):
             'cell_line_baselines': data.get('cell_line_baselines', {}),
         }, f)
 
-    splits = create_kfold_splits(normalized_data, args, landmark_gene_ids,
-                                  n_folds=10, random_seed=42)
+    if args.warm_start:
+        splits = create_warm_start_splits(normalized_data, n_folds=5, random_seed=42)
+    else:
+        splits = create_kfold_splits(normalized_data, args, landmark_gene_ids,
+                                  n_folds=5, random_seed=42)
     return splits, collapsed_save_path
 
 TIME_BIN_EDGES = np.array([0, 3, 6, 12, 24, 48, 72])
@@ -236,7 +238,7 @@ def encode_time_bins(durations, bin_edges=TIME_BIN_EDGES):
               .astype(np.int64))
 
 def create_kfold_splits(collapsed_data, args,
-                         landmark_gene_ids, n_folds=10,
+                         landmark_gene_ids, n_folds=5,
                          random_seed=42):
     drug_names = collapsed_data['drug_names']
     unique_drugs = np.unique(drug_names)
@@ -283,4 +285,38 @@ def create_kfold_splits(collapsed_data, args,
             'val':   make_split(val_idx, collapsed_data),
             'test':  make_split(test_idx, collapsed_data)
         })
+    return all_splits
+
+def create_warm_start_splits(collapsed_data, n_folds=5, random_seed=42):
+    n_samples = len(collapsed_data['delta_expr'])
+    
+    np.random.seed(random_seed)
+    indices = np.random.permutation(n_samples)
+    folds = np.array_split(indices, n_folds)
+    
+    all_splits = []
+    for test_fold_idx in range(n_folds):
+        test_idx = folds[test_fold_idx]
+        
+        train_val_idx = np.concatenate([
+            folds[i] for i in range(n_folds) if i != test_fold_idx
+        ])
+        
+        # carve out validation from train
+        n_val = len(train_val_idx) // n_folds
+        val_idx   = train_val_idx[:n_val]
+        train_idx = train_val_idx[n_val:]
+        
+        print(f"\nFold {test_fold_idx} as test:")
+        print(f"  Train: {len(train_idx)} samples")
+        print(f"  Val:   {len(val_idx)} samples")
+        print(f"  Test:  {len(test_idx)} samples")
+        
+        all_splits.append({
+            'fold':  test_fold_idx,
+            'train': make_split(train_idx, collapsed_data),
+            'val':   make_split(val_idx,   collapsed_data),
+            'test':  make_split(test_idx,  collapsed_data)
+        })
+    
     return all_splits
