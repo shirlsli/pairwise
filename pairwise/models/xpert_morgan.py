@@ -1,616 +1,435 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
+import math
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-import numpy as np
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
+from sklearn.metrics import r2_score
 
-class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, hidden_size, num_heads,
-                 attn_dropout, hidden_dropout, topk=None):
-        super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = hidden_size // num_heads
-        self.scale = self.head_dim ** -0.5
-        self.topk = topk
+"""
+Guo, Y., Zhang, H., Hu, H. et al. 
+Modelling drug-induced cellular perturbation responses with a biologically informed dual-branch transformer. 
+Nat Mach Intell 8, 96–112 (2026). https://doi.org/10.1038/s42256-025-01165-w
+"""
+class PerturbationDataset(Dataset):
+    def __init__(self, split_data, cell_id_to_idx):
+        self.drug_fp      = torch.tensor(split_data['drug_fp'],      dtype=torch.float32)
+        self.ccl          = torch.tensor(split_data['ccl'],          dtype=torch.float32)
+        self.ccl_binned   = torch.tensor(split_data['ccl_binned'],   dtype=torch.long)
+        self.delta_expr   = torch.tensor(split_data['delta_expr'],   dtype=torch.float32)
+        self.time_idx     = torch.tensor(split_data['time_idx'],     dtype=torch.long)
+        self.cell_ids     = split_data['cell_ids']
 
-        self.q = nn.Linear(hidden_size, hidden_size)
-        self.k = nn.Linear(hidden_size, hidden_size)
-        self.v = nn.Linear(hidden_size, hidden_size)
-        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        self.cell_idx = torch.tensor(
+            [cell_id_to_idx[c] for c in self.cell_ids], dtype=torch.long
+        )
 
-        self.attn_dropout = nn.Dropout(attn_dropout)
-        self.hidden_dropout = nn.Dropout(hidden_dropout)
-        self.layer_norm = nn.LayerNorm(hidden_size)
+    def __len__(self):
+        return len(self.drug_fp)
 
-    def forward(self, x, attention_mask=None,
-                sparse_flag=False, output_attention=False):
-        B, L, D = x.shape
-        H, HD = self.num_heads, self.head_dim
+    def __getitem__(self, idx):
+        # trt_raw_data and ctl_raw_data are the same here since we only
+        # have the control expression and the delta — model needs both
+        return (
+        self.delta_expr[idx],    # trt_raw_data
+        self.ccl[idx],           # ctl_raw_data
+        self.ccl_binned[idx],    # ctl_raw_data_binned
+        self.drug_fp[idx],       # drug_feat
+        self.time_idx[idx],      # pert_time_idx
+        self.cell_idx[idx],      # cell_idx
+        )
 
-        q = self.q(x).view(B, L, H, HD).transpose(1, 2)
-        k = self.k(x).view(B, L, H, HD).transpose(1, 2)
-        v = self.v(x).view(B, L, H, HD).transpose(1, 2)
 
-        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+class LayerNorm(nn.Module):
+    def __init__(self, hidden_size, variance_epsilon=1e-12):
+        super(LayerNorm, self).__init__()
+        self.gamma = nn.Parameter(torch.ones(hidden_size))
+        self.beta = nn.Parameter(torch.zeros(hidden_size))
+        self.variance_epsilon = variance_epsilon
 
-        if attention_mask is not None:
-            attn = attn + attention_mask
+    def forward(self, x):
+        u = x.mean(-1, keepdim=True)
+        s = (x - u).pow(2).mean(-1, keepdim=True)
+        x = (x - u) / torch.sqrt(s + self.variance_epsilon)
+        return self.gamma * x + self.beta
 
-        if sparse_flag and self.topk is not None:
-            topk_val, _ = torch.topk(attn, self.topk, dim=-1)
-            threshold = topk_val[..., -1].unsqueeze(-1)
-            attn = attn.masked_fill(attn < threshold, float('-inf'))
 
-        attn_weights = torch.softmax(attn, dim=-1)
-        attn_weights = self.attn_dropout(attn_weights)
+class cell_Embeddings(nn.Module):
+    def __init__(self, vocab_size, hidden_size, max_position_size, dropout_rate, pretrained_embed_path):
+        super(cell_Embeddings, self).__init__()
 
-        out = torch.matmul(attn_weights, v)
-        out = out.transpose(1, 2).contiguous().view(B, L, D)
-        out = self.out_proj(out)
-        out = self.layer_norm(x + self.hidden_dropout(out))
+        self.word_embeddings = nn.Embedding(vocab_size, hidden_size)
+
+        pretrained_embed = np.load(pretrained_embed_path, allow_pickle=True)
+        pretrained_embed = torch.tensor(pretrained_embed).float()
+        if hidden_size != pretrained_embed.size(-1):
+            self.linear = nn.Linear(pretrained_embed.size(-1), hidden_size)
+            pretrained_embed = self.linear(pretrained_embed)
+
+        self.pretrained_embed = nn.Embedding.from_pretrained(pretrained_embed, freeze=False)
+
+        self.LayerNorm = LayerNorm(hidden_size)
+        self.dropout = nn.Dropout(dropout_rate)
+
+    def forward(self, input_ids):
+        words_embeddings = self.word_embeddings(input_ids)
+
+        seq_length = input_ids.size(1)
+        position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
+        position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+        pretrained_embed = self.pretrained_embed(position_ids)
+        embeddings = words_embeddings + pretrained_embed
+
+        embeddings = self.LayerNorm(embeddings)
+        embeddings = self.dropout(embeddings)
+        return embeddings
+
+
+class morgan_Embeddings(nn.Module):
+    def __init__(self, hidden_size, dropout_rate, time_embed):
+        super(morgan_Embeddings, self).__init__()
+        self.time_embed = time_embed
+        self.position_embeddings = nn.Embedding(2, hidden_size)  # time + mol
+        self.LayerNorm = LayerNorm(hidden_size)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.linear = nn.Linear(1024, hidden_size)
+
+    def forward(self, input_embed, pert_time_idx):
+        mol_embed = self.linear(input_embed).unsqueeze(1)
+        time_embed = self.time_embed(pert_time_idx).unsqueeze(1)
+        input_embeddings = torch.cat([time_embed, mol_embed], dim=1)
+
+        seq_length = input_embeddings.size(1)
+        position_ids = torch.arange(seq_length, dtype=torch.long, device=input_embed.device)
+        position_ids = position_ids.unsqueeze(0).expand(input_embeddings.size(0), -1)
+        position_embeddings = self.position_embeddings(position_ids)
+
+        embeddings = input_embeddings + position_embeddings
+        embeddings = self.LayerNorm(embeddings)
+        embeddings = self.dropout(embeddings)
+        return embeddings
+
+
+class SelfAttention(nn.Module):
+    def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob):
+        super(SelfAttention, self).__init__()
+        if hidden_size % num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({hidden_size}) is not a multiple of the number of attention heads ({num_attention_heads})"
+            )
+        self.num_attention_heads = num_attention_heads
+        self.attention_head_size = hidden_size // num_attention_heads
+
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
+        self.value = nn.Linear(hidden_size, hidden_size)
+
+        self.dropout_p = attention_probs_dropout_prob
+
+    def forward(self, hidden_states, attention_mask=None, output_attention=False):
+        batch_size, seq_len, hidden_size = hidden_states.size()
+
+        query = self.query(hidden_states)
+        key = self.key(hidden_states)
+        value = self.value(hidden_states)
+
+        query = query.view(batch_size, seq_len, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        key = key.view(batch_size, seq_len, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        value = value.view(batch_size, seq_len, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
 
         if output_attention:
-            return out, attn_weights
-        return out, None
+            attention_scores = torch.matmul(query, key.transpose(-1, -2))
+            attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+            if attention_mask is not None:
+                attention_scores = attention_scores + attention_mask
+            attention_probs = F.softmax(attention_scores, dim=-1)
+            context = torch.matmul(attention_probs, value)
+            context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, hidden_size)
+            return context, attention_probs
+        else:
+            context = F.scaled_dot_product_attention(
+                query, key, value,
+                dropout_p=self.dropout_p if self.training else 0.0
+            )
+            context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, hidden_size)
+            return context, None
 
 
-class MultiHeadCrossAttention(nn.Module):
-    def __init__(self, hidden_size, num_heads,
-                 attn_dropout, hidden_dropout,
-                 topk_query=None, topk_key=None):
-        super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = hidden_size // num_heads
-        self.scale = self.head_dim ** -0.5
-        self.topk_query = topk_query
-        self.topk_key = topk_key
+class CrossAttention(nn.Module):
+    def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob):
+        super(CrossAttention, self).__init__()
+        if hidden_size % num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({hidden_size}) is not a multiple of the number of attention heads ({num_attention_heads})"
+            )
+        self.num_attention_heads = num_attention_heads
+        self.attention_head_size = hidden_size // num_attention_heads
 
-        self.q = nn.Linear(hidden_size, hidden_size)
-        self.k = nn.Linear(hidden_size, hidden_size)
-        self.v = nn.Linear(hidden_size, hidden_size)
-        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
+        self.value = nn.Linear(hidden_size, hidden_size)
 
-        self.attn_dropout = nn.Dropout(attn_dropout)
-        self.hidden_dropout = nn.Dropout(hidden_dropout)
-        self.layer_norm = nn.LayerNorm(hidden_size)
+        self.dropout_p = attention_probs_dropout_prob
 
-    def forward(self, query, key_value,
-                key_mask=None, query_mask=None,
-                sparse_flag=False, output_attention=False):
-        B, Lq, D = query.shape
-        H, HD = self.num_heads, self.head_dim
+    def forward(self, cell, drug, cell_attention_mask=None,
+            drug_attention_mask=None, output_attention=False):
+        batch_size, seq_len_A, hidden_size = cell.size()
+        _, seq_len_B, _ = drug.size()
 
-        q = self.q(query).view(B, Lq, H, HD).transpose(1, 2)
-        k = self.k(key_value).view(B, -1, H, HD).transpose(1, 2)
-        v = self.v(key_value).view(B, -1, H, HD).transpose(1, 2)
+        query = self.query(cell)
+        key   = self.key(drug)
+        value = self.value(drug)
 
-        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-
-        if key_mask is not None:
-            attn = attn + key_mask
-
-        attn_weights = torch.softmax(attn, dim=-1)
-        attn_weights = self.attn_dropout(attn_weights)
-
-        out = torch.matmul(attn_weights, v)
-        out = out.transpose(1, 2).contiguous().view(B, Lq, D)
-        out = self.out_proj(out)
-        out = self.layer_norm(query + self.hidden_dropout(out))
+        query = query.view(batch_size, seq_len_A, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        key   = key.view(batch_size, seq_len_B, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        value = value.view(batch_size, seq_len_B, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
 
         if output_attention:
-            return out, attn_weights
-        return out, None
+            attention_scores = torch.matmul(query, key.transpose(-1, -2))
+            attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+            if cell_attention_mask is not None:
+                attention_scores = attention_scores + cell_attention_mask
+            attention_probs = F.softmax(attention_scores, dim=-1)
+            context = torch.matmul(attention_probs, value)
+            context = context.transpose(1, 2).contiguous().view(batch_size, seq_len_A, hidden_size)
+            return context, attention_probs
+        else:
+            context = F.scaled_dot_product_attention(
+                query, key, value,
+                dropout_p=self.dropout_p if self.training else 0.0
+            )
+            context = context.transpose(1, 2).contiguous().view(batch_size, seq_len_A, hidden_size)
+            return context, None
 
 
 class FeedForward(nn.Module):
-    def __init__(self, hidden_size, intermediate_size, dropout):
-        super().__init__()
-        self.fc1 = nn.Linear(hidden_size, intermediate_size)
-        self.fc2 = nn.Linear(intermediate_size, hidden_size)
-        self.act = nn.GELU()
-        self.dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(hidden_size)
+    def __init__(self, hidden_size, intermediate_size, hidden_dropout_prob):
+        super(FeedForward, self).__init__()
+        self.dense_1 = nn.Linear(hidden_size, intermediate_size)
+        self.intermediate_act_fn = nn.ReLU()
+        self.dense_2 = nn.Linear(intermediate_size, hidden_size)
+        self.dropout = nn.Dropout(hidden_dropout_prob)
 
-    def forward(self, x):
-        out = self.fc2(self.dropout(self.act(self.fc1(x))))
-        return self.layer_norm(x + out)
-
-
-class SelfAttentionBlock(nn.Module):
-    def __init__(self, hidden_size, intermediate_size,
-                 num_heads, attn_dropout, hidden_dropout, topk=None):
-        super().__init__()
-        self.attn = MultiHeadSelfAttention(
-            hidden_size, num_heads, attn_dropout, hidden_dropout, topk
-        )
-        self.ff = FeedForward(hidden_size, intermediate_size, hidden_dropout)
-
-    def forward(self, x, attention_mask=None,
-                sparse_flag=False, output_attention=False):
-        x, attn_weights = self.attn(
-            x, attention_mask, sparse_flag, output_attention
-        )
-        x = self.ff(x)
-        return x, attn_weights
+    def forward(self, hidden_states):
+        hidden_states = self.dense_1(hidden_states)
+        hidden_states = self.intermediate_act_fn(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.dense_2(hidden_states)
+        return hidden_states
 
 
-class CrossAttentionBlock(nn.Module):
-    def __init__(self, hidden_size, intermediate_size,
-                 num_heads, attn_dropout, hidden_dropout,
-                 topk_query=None, topk_key=None):
-        super().__init__()
-        self.cross_attn = MultiHeadCrossAttention(
-            hidden_size, num_heads, attn_dropout, hidden_dropout,
-            topk_query, topk_key
-        )
-        self.self_attn = MultiHeadSelfAttention(
-            hidden_size, num_heads, attn_dropout, hidden_dropout
-        )
-        self.ff = FeedForward(hidden_size, intermediate_size, hidden_dropout)
+class SublayerConnection(nn.Module):
+    def __init__(self, hidden_size, hidden_dropout_prob):
+        super(SublayerConnection, self).__init__()
+        self.LayerNorm = LayerNorm(hidden_size)
+        self.dropout = nn.Dropout(hidden_dropout_prob)
 
-    def forward(self, cell_embed, drug_embed,
-                drug_mask=None, cell_mask=None,
-                sparse_flag=False, output_attention=False):
-        # Cell attends to drug
-        cell_embed, attn_weights = self.cross_attn(
-            cell_embed, drug_embed,
-            key_mask=drug_mask, query_mask=cell_mask,
-            sparse_flag=sparse_flag,
-            output_attention=output_attention
-        )
-        # Drug self-attention
-        drug_embed, _ = self.self_attn.__class__.forward(
-            self.self_attn, drug_embed,
-            attention_mask=drug_mask,
-            sparse_flag=sparse_flag,
-            output_attention=False
-        )
-        cell_embed = self.ff(cell_embed)
-        return cell_embed, drug_embed, attn_weights
+    def forward(self, hidden_states, input_tensor):
+        hidden_states = self.dropout(self.LayerNorm(hidden_states))
+        return hidden_states + input_tensor
 
+
+class SelfOutput(nn.Module):
+    def __init__(self, hidden_size, intermediate_size, hidden_dropout_prob):
+        super(SelfOutput, self).__init__()
+        self.feed_forward = FeedForward(hidden_size, intermediate_size, hidden_dropout_prob)
+        self.sublayer = SublayerConnection(hidden_size, hidden_dropout_prob)
+
+    def forward(self, input_tensor):
+        hidden_states = self.feed_forward(input_tensor)
+        hidden_states = self.sublayer(hidden_states, input_tensor)
+        return hidden_states
+
+
+class Encoder(nn.Module):
+    def __init__(self, hidden_size, intermediate_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):
+        super(Encoder, self).__init__()
+        self.attention = SelfAttention(hidden_size, num_attention_heads, attention_probs_dropout_prob)
+        self.sublayer = SublayerConnection(hidden_size, hidden_dropout_prob)
+        self.output = SelfOutput(hidden_size, intermediate_size, hidden_dropout_prob)
+
+    def forward(self, input_tensor, attention_mask=None, output_attention=False):
+        attention_output, attention_probs = self.attention(input_tensor, attention_mask, output_attention)
+        attention_output = self.sublayer(attention_output, input_tensor)
+        layer_output = self.output(attention_output)
+        return layer_output, attention_probs
+
+
+class crossEncoder(nn.Module):
+    def __init__(self, hidden_size, intermediate_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):
+        super(crossEncoder, self).__init__()
+        self.attention_CA = CrossAttention(hidden_size, num_attention_heads, attention_probs_dropout_prob)
+        self.attention = SelfAttention(hidden_size, num_attention_heads, attention_probs_dropout_prob)
+        self.sublayer = SublayerConnection(hidden_size, hidden_dropout_prob)
+        self.output = SelfOutput(hidden_size, intermediate_size, hidden_dropout_prob)
+        self.drug_SA = Encoder(hidden_size, intermediate_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob)
+
+    def forward(self, cell, drug, drug_attention_mask=None, cell_attention_mask=None, output_attention=False):
+        drug_SA_embed, _ = self.drug_SA(drug, drug_attention_mask, output_attention)
+
+        cell_attention_out_0, cell_attention_probs_0 = self.attention(cell, cell_attention_mask, output_attention)
+        cell_embed = self.sublayer(cell_attention_out_0, cell)
+
+        cell_attention_output_1, cell_attention_probs_1 = self.attention_CA(cell_embed, drug_SA_embed, cell_attention_mask, drug_attention_mask, output_attention)
+        cell_embed = self.sublayer(cell_attention_output_1, cell_embed)
+        cell_intermediate_output = self.output(cell_embed)
+
+        return cell_intermediate_output, drug_SA_embed, cell_attention_probs_1
 
 class AttnEncoder(nn.Module):
-    """
-    Flexible encoder supporting interleaved self-attention (SA) and
-    cross-attention (CA) layers, controlled by a '+'-delimited structure
-    string (e.g. 'SA+SA' for base encoder, 'CA+SA+CA' for pert encoder).
-    """
-    def __init__(self, hidden_size, intermediate_size,
-                 num_heads, attn_dropout, hidden_dropout,
-                 topk_cell, topk_drug, structure, sparse_flag=False):
-        super().__init__()
+    def __init__(self, config, structure):
+        super(AttnEncoder, self).__init__()
+
+        hidden_size = config['model']['ATTN']['hidden_size']
+        intermediate_size = hidden_size * 2
+        num_attention_heads = config['model']['ATTN']['n_heads']
+        attention_probs_dropout_prob = config['model']['ATTN']['attention_probs_dropout_prob']
+        hidden_dropout_prob = config['model']['ATTN']['hidden_dropout_prob']
+
         self.structure = structure
-        self.layers_spec = structure.split('+')
-        self.sparse_flag = sparse_flag
+        self.layers = self.structure.split('+')
+        CA_N = self.layers.count('CA')
+        SA_N = self.layers.count('SA')
 
-        n_ca = self.layers_spec.count('CA')
-        n_sa = self.layers_spec.count('SA')
+        self.crossEncoders = nn.ModuleList(
+            [crossEncoder(hidden_size, intermediate_size, num_attention_heads,
+                          attention_probs_dropout_prob, hidden_dropout_prob) for _ in range(CA_N)]
+        )
+        self.selfEncoders = nn.ModuleList(
+            [Encoder(hidden_size, intermediate_size, num_attention_heads,
+                     attention_probs_dropout_prob, hidden_dropout_prob) for _ in range(SA_N)]
+        )
 
-        self.cross_blocks = nn.ModuleList([
-            CrossAttentionBlock(
-                hidden_size, intermediate_size, num_heads,
-                attn_dropout, hidden_dropout, topk_cell, topk_drug
-            ) for _ in range(n_ca)
-        ])
-        self.self_blocks = nn.ModuleList([
-            SelfAttentionBlock(
-                hidden_size, intermediate_size, num_heads,
-                attn_dropout, hidden_dropout, topk_cell
-            ) for _ in range(n_sa)
-        ])
-
-    def forward(self, cell_embed, drug_embed=None,
-                cell_mask=None, drug_mask=None,
-                output_attention=False):
-        ca_idx = 0
-        sa_idx = 0
+    def forward(self, cell_embed, drug_embed=None, cell_attention_mask=None, drug_attention_mask=None, output_attention=False):
+        CA_layer_idx = 0
+        SA_layer_idx = 0
         attention_dict = {}
 
-        for step, layer_type in enumerate(self.layers_spec):
+        for layer_count, layer_type in enumerate(self.layers):
             if layer_type == 'CA':
-                assert drug_embed is not None, \
-                    "drug_embed required for CA layers"
-                cell_embed, drug_embed, attn = self.cross_blocks[ca_idx](
-                    cell_embed, drug_embed,
-                    drug_mask=drug_mask, cell_mask=cell_mask,
-                    sparse_flag=self.sparse_flag,
-                    output_attention=output_attention
-                )
+                cell_embed, drug_embed, attention = self.crossEncoders[CA_layer_idx](
+                    cell_embed, drug_embed, drug_attention_mask, cell_attention_mask, output_attention)
                 if output_attention:
-                    attention_dict[f'CA_{step}'] = attn
-                ca_idx += 1
+                    attention_dict[f'CA_{layer_count}'] = attention
+                CA_layer_idx += 1
+
             elif layer_type == 'SA':
-                cell_embed, attn = self.self_blocks[sa_idx](
-                    cell_embed,
-                    attention_mask=cell_mask,
-                    sparse_flag=self.sparse_flag,
-                    output_attention=output_attention
-                )
+                cell_embed, attention = self.selfEncoders[SA_layer_idx](
+                    cell_embed, cell_attention_mask, output_attention)
                 if output_attention:
-                    attention_dict[f'SA_{step}'] = attn
-                sa_idx += 1
-
-        return cell_embed, drug_embed, attention_dict if output_attention else None
-
-class LearnedCellEmbeddings(nn.Module):
-    def __init__(self, gene_number, hidden_size, n_bins, dropout):
-        super().__init__()
-        self.gene_number = gene_number
-
-        self.gene_id_embedding = nn.Embedding(gene_number, hidden_size)
-        self.expr_level_embedding = nn.Embedding(n_bins, hidden_size)
-        self.layer_norm = nn.LayerNorm(hidden_size)
-        self.dropout = nn.Dropout(dropout)
-
-        nn.init.normal_(self.gene_id_embedding.weight, std=0.02)
-        nn.init.normal_(self.expr_level_embedding.weight, std=0.02)
-
-    def forward(self, binned_expr):
-        batch_size = binned_expr.shape[0]
-        gene_indices = (
-            torch.arange(self.gene_number, device=binned_expr.device)
-            .unsqueeze(0).expand(batch_size, -1)
-        )
-        gene_id_embed = self.gene_id_embedding(gene_indices)
-        expr_embed = self.expr_level_embedding(binned_expr)
-        tokens = self.layer_norm(gene_id_embed + expr_embed)
-        return self.dropout(tokens)
-
-class MorganDrugEmbeddings(nn.Module):
-    def __init__(self, fingerprint_dim, hidden_size,
-                 hidden_dim, dropout, num_time_bins):
-        super().__init__()
-
-        # Time condition token — discrete embedding over binned durations
-        self.time_embedding = nn.Embedding(num_time_bins, hidden_size)
-
-        # Morgan fingerprint → single mol token
-        self.fp_encoder = nn.Sequential(
-            nn.Linear(fingerprint_dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, hidden_size)
-        )
-
-        self.position_embedding = nn.Embedding(2, hidden_size)
-
-        self.layer_norm = nn.LayerNorm(hidden_size)
-        self.dropout = nn.Dropout(dropout)
-
-        nn.init.normal_(self.time_embedding.weight, std=0.02)
-        nn.init.normal_(self.position_embedding.weight, std=0.02)
-
-    def forward(self, fingerprint, time_idx):
-        time_tok = self.time_embedding(time_idx)    # (batch, hidden_size)
-        mol_tok  = self.fp_encoder(fingerprint)     # (batch, hidden_size)
-
-        # Stack into sequence: (batch, 2, hidden_size)
-        tokens = torch.stack([time_tok, mol_tok], dim=1)
-
-        # Add positional embeddings
-        positions = torch.arange(2, device=fingerprint.device)
-        tokens = tokens + self.position_embedding(positions).unsqueeze(0)
-
-        tokens = self.layer_norm(tokens)
-        return self.dropout(tokens)
-
-class DeltaHead(nn.Module):
-    def __init__(self, hidden_size, latent_size):
-        super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(hidden_size, latent_size),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(latent_size, 1)
-        )
-
-    def forward(self, trt_embed, ctl_embed):
-        diff = trt_embed - ctl_embed
-        return self.fc(diff).squeeze(-1)
-
-class XPertMorgan(nn.Module):
-    """
-    XPert adapted as a transition function fT for SequenTx-style sequential
-    drug combination prediction, predicting only delta expression
-    (xdeg = xpert - xbase).
-    """
-
-    def __init__(
-        self,
-        gene_number=978,
-        fingerprint_dim=1024,
-        hidden_size=128,
-        n_bins=64,
-        num_heads=4,
-        ctl_structure='SA+SA',
-        trt_structure='CA+SA+CA',
-        intermediate_size=None,
-        attn_dropout=0.1,
-        hidden_dropout=0.1,
-        topk_cell=None,
-        topk_drug=None,
-        drug_hidden_dim=512,
-        latent_size=64,
-        num_time_bins=6,
-        mse_weight=1.0,
-        pcc_weight=1.0,
-        learning_rate=4e-3,
-        weight_decay=1e-5,
-        epoch=500,
-        device='cuda',
-        model_file='xpert_morgan.pt'
-    ):
-        super().__init__()
-
-        if intermediate_size is None:
-            intermediate_size = hidden_size * 2
-
-        self.gene_number = gene_number
-        self.epoch = epoch
-        self.my_device = torch.device(device)
-        self.learning_rate = learning_rate
-        self.model_file = model_file
-        self.mse_weight = mse_weight
-        self.pcc_weight = pcc_weight
-        
-        self.cell_emb = LearnedCellEmbeddings(
-            gene_number=gene_number,
-            hidden_size=hidden_size,
-            n_bins=n_bins,
-            dropout=hidden_dropout
-        )
-        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
-        self.drug_emb = MorganDrugEmbeddings(
-            fingerprint_dim=fingerprint_dim,
-            hidden_size=hidden_size,
-            hidden_dim=drug_hidden_dim,
-            dropout=hidden_dropout,
-            num_time_bins=num_time_bins
-        )
-        self.base_encoder = AttnEncoder(
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            num_heads=num_heads,
-            attn_dropout=attn_dropout,
-            hidden_dropout=hidden_dropout,
-            topk_cell=topk_cell,
-            topk_drug=topk_drug,
-            structure=ctl_structure
-        )
-        self.pert_encoder = AttnEncoder(
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            num_heads=num_heads,
-            attn_dropout=attn_dropout,
-            hidden_dropout=hidden_dropout,
-            topk_cell=topk_cell,
-            topk_drug=topk_drug,
-            structure=trt_structure
-        )
-        self.delta_head = DeltaHead(
-            hidden_size=hidden_size,
-            latent_size=latent_size
-        )
-        self.optimizer = optim.AdamW(
-            self.parameters(),
-            lr=learning_rate,
-            weight_decay=weight_decay
-        )
-        self._warmup_epochs = max(1, int(0.1 * epoch))
-        self.scheduler = optim.lr_scheduler.LambdaLR(
-            self.optimizer,
-            lr_lambda=self._lr_lambda
-        )
-
-        self.to(self.my_device)
-        self._init_weights()
-
-    def _lr_lambda(self, epoch_idx):
-        if epoch_idx < self._warmup_epochs:
-            return float(epoch_idx + 1) / float(self._warmup_epochs)
-        progress = (epoch_idx - self._warmup_epochs) / max(
-            1, self.epoch - self._warmup_epochs
-        )
-        return 0.5 * (1.0 + np.cos(np.pi * progress))
-
-    def _init_weights(self):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.LayerNorm):
-                nn.init.ones_(module.weight)
-                nn.init.zeros_(module.bias)
-
-    def _pcc_loss(self, pred, target):
-        """
-        1 - mean sample-level PCC (XPert Ldeg equation 14, gamma term).
-        pred, target: (batch, gene_number)
-        """
-        pred_mean = pred.mean(dim=1, keepdim=True)
-        tgt_mean  = target.mean(dim=1, keepdim=True)
-        pred_c = pred   - pred_mean
-        tgt_c  = target - tgt_mean
-        cov = (pred_c * tgt_c).sum(dim=1)
-        std = (
-            pred_c.pow(2).sum(dim=1).sqrt()
-            * tgt_c.pow(2).sum(dim=1).sqrt()
-            + 1e-8
-        )
-        return 1.0 - (cov / std).mean()
-
-    def loss_fn(self, pred, target):
-        """
-        Ldeg = beta * MSE + gamma * (1 - PCC)  [XPert equation 14]
-        """
-        mse   = nn.functional.mse_loss(pred, target)
-        pcc_l = self._pcc_loss(pred, target)
-        return self.mse_weight * mse + self.pcc_weight * pcc_l
-
-    def _unpack_batch(self, batch):
-        fingerprint = batch[0].to(self.my_device)
-        binned_expr = batch[1].to(self.my_device)
-        time_idx    = batch[2].to(self.my_device)
-        y           = batch[3].to(self.my_device)
-        return fingerprint, binned_expr, time_idx, y
-
-    def forward(self, fingerprint, binned_expr, time_idx,
-                output_attention=False):
-        batch_size = fingerprint.shape[0]
-
-        gene_tokens = self.cell_emb(binned_expr)
-        cls = self.cls_token.expand(batch_size, -1, -1)
-        cell_input = torch.cat([cls, gene_tokens], dim=1)
-        drug_tokens = self.drug_emb(fingerprint, time_idx)
-        ctl_out, _, ctl_attn = self.base_encoder(
-            cell_input,
-            drug_embed=None,
-            output_attention=output_attention
-        )
-        ctl_gene_embed = ctl_out[:, 1:, :]
-        trt_out, _, trt_attn = self.pert_encoder(
-            cell_input,
-            drug_embed=drug_tokens,
-            output_attention=output_attention
-        )
-        trt_gene_embed = trt_out[:, 1:, :]
-        delta = self.delta_head(trt_gene_embed, ctl_gene_embed)
+                    attention_dict[f'SA_{layer_count}'] = attention
+                SA_layer_idx += 1
 
         if output_attention:
-            return delta, {'trt': trt_attn, 'ctl': ctl_attn}
-        return delta
+            return cell_embed, drug_embed, attention_dict
+        return cell_embed, drug_embed, None
 
-    def fit(self, train_loader, valid_loader):
-        """
-        Train with early stopping (patience=50, matching XPert).
-        Best model by validation loss is saved to self.model_file.
-        Scheduler steps once per epoch after each full pass over training data.
-        """
-        min_valid_loss   = float('inf')
-        patience_counter = 0
-        patience = 50
 
-        for epoch_idx in range(self.epoch):
+class XPertMorgan(torch.nn.Module):
+    def __init__(self, config, device):
+        super(XPertMorgan, self).__init__()
 
-            self.train()
-            train_loss = 0.0
-            for batch in train_loader:
-                fingerprint, binned_expr, time_idx, y = \
-                    self._unpack_batch(batch)
+        self.device = device
 
-                self.optimizer.zero_grad()
-                pred = self.forward(fingerprint, binned_expr, time_idx)
-                loss = self.loss_fn(pred, y)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
-                self.optimizer.step()
-                train_loss += loss.item()
+        max_gene_length = config['dataset']['gene_num']
+        exp_vocab_size = config['dataset']['n_bins']
 
-            train_loss /= len(train_loader)
-            self.scheduler.step()
+        hidden_size = config['model']['ATTN']['hidden_size']
+        self.hidden_size = hidden_size
+        cell_input_hidden_dropout_prob = config['model']['ATTN']['cell_input_hidden_dropout_prob']
+        drug_input_hidden_dropout_prob = config['model']['ATTN']['drug_input_hidden_dropout_prob']
 
-            self.eval()
-            valid_loss = 0.0
-            with torch.no_grad():
-                for batch in valid_loader:
-                    fingerprint, binned_expr, time_idx, y = \
-                        self._unpack_batch(batch)
-                    pred = self.forward(fingerprint, binned_expr, time_idx)
-                    valid_loss += self.loss_fn(pred, y).item()
-
-            valid_loss /= len(valid_loader)
-
-            if valid_loss < min_valid_loss:
-                min_valid_loss   = valid_loss
-                patience_counter = 0
-                torch.save(self, self.model_file)
-            else:
-                patience_counter += 1
-                if patience_counter >= patience:
-                    print(f'Early stopping at epoch {epoch_idx}')
-                    break
-
-            print(
-                f'Epoch {epoch_idx:4d} | '
-                f'train {train_loss:.4f} | '
-                f'valid {valid_loss:.4f} | '
-                f'lr {self.scheduler.get_last_lr()[0]:.2e}'
-            )
-
-    def predict(self, fingerprint, binned_expr, time_idx,
-                output_attention=False):
-        self.eval()
-
-        def to_tensor(x, dtype):
-            if isinstance(x, np.ndarray):
-                return torch.tensor(x, device=self.my_device, dtype=dtype)
-            return x.to(self.my_device)
-
-        fingerprint = to_tensor(fingerprint, torch.float32)
-        binned_expr = to_tensor(binned_expr, torch.long)
-        time_idx    = to_tensor(time_idx,    torch.long)
-
-        with torch.no_grad():
-            if output_attention:
-                delta, attn = self.forward(
-                    fingerprint, binned_expr, time_idx,
-                    output_attention=True
-                )
-                return delta.cpu().numpy(), attn
-            delta = self.forward(fingerprint, binned_expr, time_idx)
-            return delta.cpu().numpy()
-
-class PerturbationDataset(Dataset):
-    def __init__(self, fingerprints, binned_expr, time_idx, y):
-        self.fingerprints = torch.tensor(fingerprints, dtype=torch.float32)
-        self.binned_expr  = torch.tensor(binned_expr,  dtype=torch.long)
-        self.time_idx     = torch.tensor(time_idx,     dtype=torch.long)
-        self.y            = torch.tensor(y,            dtype=torch.float32)
-
-    def __len__(self):
-        return len(self.fingerprints)
-
-    def __getitem__(self, idx):
-        return (
-            self.fingerprints[idx],
-            self.binned_expr[idx],
-            self.time_idx[idx],
-            self.y[idx]
+        pretrained_ppi_embed_path = config['model']['ATTN']['ppi_gene_vector_path']
+        self.cell_emb = cell_Embeddings(
+            exp_vocab_size, hidden_size, max_gene_length,
+            cell_input_hidden_dropout_prob, pretrained_ppi_embed_path
         )
 
-def evaluate_model(model, data_loader):
-    model.eval()
-    all_preds   = []
-    all_targets = []
+        pert_time_emb = nn.Embedding(config['dataset']['num_pert_time'], hidden_size)
+        self.drug_emb = morgan_Embeddings(
+        hidden_size, drug_input_hidden_dropout_prob, pert_time_emb)
 
-    with torch.no_grad():
-        for batch in data_loader:
-            fingerprint, binned_expr, time_idx, y = \
-                model._unpack_batch(batch)
-            pred = model.forward(fingerprint, binned_expr, time_idx)
-            all_preds.append(pred.cpu().numpy())
-            all_targets.append(y.cpu().numpy())
+        ctl_structure = config['model']['ATTN']['ctl_structure']
+        trt_structure = config['model']['ATTN']['trt_structure']
+        self.attnEncoder_ctl = AttnEncoder(config, ctl_structure)
+        self.attnEncoder_trt = AttnEncoder(config, trt_structure)
 
-    all_preds   = np.vstack(all_preds)
-    all_targets = np.vstack(all_targets)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
+        num_cell_id = config['dataset']['num_cell_id']
+        self.class_fc = nn.Linear(hidden_size, num_cell_id)
 
-    pccs = [
-        pearsonr(all_targets[i], all_preds[i])[0]
-        for i in range(len(all_targets))
-    ]
+        latent_size = 64
+        self.ctl_fc = nn.Sequential(
+            nn.Linear(hidden_size, latent_size),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(latent_size, 1),
+        )
+        self.trt_fc = nn.Sequential(
+            nn.Linear(hidden_size, latent_size),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(latent_size, 1),
+        )
+        self.deg_fc = nn.Sequential(
+            nn.Linear(hidden_size, latent_size),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(latent_size, 1),
+        )
 
-    print(f'Mean PCC:   {np.mean(pccs):.4f}')
-    print(f'Median PCC: {np.median(pccs):.4f}')
-    print(f'Std PCC:    {np.std(pccs):.4f}')
+    def forward(self, data, output_attention=False):
+        trt_raw_data, ctl_raw_data, ctl_raw_data_binned, drug_feat, pert_time_idx, cell_idx = data
 
-    return np.array(pccs)
+        trt_raw_data = trt_raw_data.to(self.device)
+        ctl_raw_data = ctl_raw_data.to(self.device)
+        ctl_raw_data_binned = ctl_raw_data_binned.to(self.device)
+        drug_feat = drug_feat.to(self.device)
+        pert_time_idx = pert_time_idx.to(self.device)
+        cell_idx = cell_idx.to(self.device)
 
-def compute_bin_edges(train_expr, n_bins=64):
+        cell_class_true = cell_idx
+        num_samples = cell_idx.shape[0]
+
+        drug_embed = self.drug_emb(drug_feat, pert_time_idx)
+        cell_embed = self.cell_emb(ctl_raw_data_binned)
+
+        cls_tokens = self.cls_token.expand(num_samples, -1, -1)
+        cell_embed = torch.cat([cls_tokens, cell_embed], dim=1)
+
+        trt_cell_embed_attn, drug_embed, trt_attention_dict = self.attnEncoder_trt(
+            cell_embed, drug_embed, None, None, output_attention)
+        ctl_cell_embed_attn, _, ctl_attention_dict = self.attnEncoder_ctl(
+            cell_embed, None, None, None, output_attention)
+
+        trt_cell_embed = trt_cell_embed_attn[:, 1:, :]
+        ctl_cell_embed = ctl_cell_embed_attn[:, 1:, :]
+        trt_cls_embed = trt_cell_embed_attn[:, 0, :]
+        ctl_cls_embed = ctl_cell_embed_attn[:, 0, :]
+
+        cell_class_predict_1 = self.class_fc(ctl_cls_embed)
+        cell_class_predict_2 = self.class_fc(trt_cls_embed)
+        cell_class_predict = (cell_class_predict_1, cell_class_predict_2)
+
+        trt_output = self.trt_fc(trt_cell_embed).squeeze(-1)
+        ctl_output = self.ctl_fc(ctl_cell_embed).squeeze(-1)
+        deg_output = self.deg_fc(trt_cell_embed - ctl_cell_embed).squeeze(-1)
+
+        attention_dict = (trt_attention_dict, ctl_attention_dict)
+
+        return trt_output, ctl_output, deg_output, trt_raw_data, ctl_raw_data, \
+        attention_dict, cell_class_true, cell_class_predict
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+
+def compute_bin_edges(train_expr, n_bins):
     flat = train_expr.flatten()
     percentiles = np.linspace(0, 100, n_bins + 1)
     return np.percentile(flat, percentiles)
@@ -620,3 +439,73 @@ def apply_binning(expr, bin_edges):
     n_bins = len(bin_edges) - 1
     binned = np.digitize(expr, bin_edges[1:-1])
     return np.clip(binned, 0, n_bins - 1).astype(np.int64)
+
+def precision_at_k(targets, preds, k=20, direction='pos'):
+    if direction == 'pos':
+        true_top = set(np.argsort(targets)[-k:])
+        pred_top = set(np.argsort(preds)[-k:])
+    else:
+        true_top = set(np.argsort(targets)[:k])
+        pred_top = set(np.argsort(preds)[:k])
+    return len(true_top & pred_top) / k
+
+def evaluate_model(model, data_loader, device):
+    model.eval()
+    all_preds   = []
+    all_targets = []
+
+    with torch.no_grad():
+        for batch in data_loader:
+            outputs = model(batch, output_attention=False)
+            trt_output, ctl_output, deg_output, trt_raw, ctl_raw, \
+                attn, cell_class_true, cell_class_predict = outputs
+            all_preds.append(deg_output.cpu().numpy())
+            all_targets.append(trt_raw.cpu().numpy())
+
+    all_preds   = np.vstack(all_preds)
+    all_targets = np.vstack(all_targets)
+    n = len(all_targets)
+
+    pccs = [pearsonr(all_targets[i], all_preds[i])[0] for i in range(n)]
+    spearmans = [spearmanr(all_targets[i], all_preds[i])[0] for i in range(n)]
+    r2s = [r2_score(all_targets[i], all_preds[i]) for i in range(n)]
+    rmse = float(np.sqrt(np.mean((all_preds - all_targets) ** 2)))
+
+    pos_p20 = [precision_at_k(all_targets[i], all_preds[i], 20, 'pos') for i in range(n)]
+    neg_p20 = [precision_at_k(all_targets[i], all_preds[i], 20, 'neg') for i in range(n)]
+
+    print(f'Mean PCC: {np.mean(pccs):.4f} ± {np.std(pccs):.4f}')
+    print(f'Median PCC: {np.median(pccs):.4f}')
+    print(f'Mean Spearman: {np.mean(spearmans):.4f} ± {np.std(spearmans):.4f}')
+    print(f'Mean R²: {np.mean(r2s):.4f} ± {np.std(r2s):.4f}')
+    print(f'RMSE: {rmse:.4f}')
+    print(f'Mean Most Upregulated 20 Genes: {np.mean(pos_p20):.4f} ± {np.std(pos_p20):.4f}')
+    print(f'Mean Most Downregulated 20 Genes: {np.mean(neg_p20):.4f} ± {np.std(neg_p20):.4f}')
+
+    return {
+        'pccs':      np.array(pccs),
+        'spearmans': np.array(spearmans),
+        'r2s':       np.array(r2s),
+        'rmse':      rmse,  # scalar
+        'pos_p20':   np.array(pos_p20),
+        'neg_p20':   np.array(neg_p20),
+    }
+
+
+def loss_fn(deg_output, trt_raw, cell_class_predict, cell_class_true,
+            mse_weight, pcc_weight):
+    mse = F.mse_loss(deg_output, trt_raw)
+
+    # differentiable 1 - mean PCC across samples in the batch
+    deg_c = deg_output - deg_output.mean(dim=1, keepdim=True)
+    trt_c = trt_raw   - trt_raw.mean(dim=1, keepdim=True)
+    pcc = (deg_c * trt_c).sum(dim=1) / (
+        deg_c.norm(dim=1) * trt_c.norm(dim=1) + 1e-8
+    )
+    pcc_loss = 1.0 - pcc.mean()
+
+    ctl_logits, trt_logits = cell_class_predict
+    ce = (F.cross_entropy(ctl_logits, cell_class_true) +
+          F.cross_entropy(trt_logits, cell_class_true)) / 2.0
+    cls_weight = 0.003
+    return mse_weight * mse + pcc_weight * pcc_loss + cls_weight * ce
