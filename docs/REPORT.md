@@ -168,7 +168,6 @@ All five folds trained to completion (200 epochs) with no early stopping trigger
 
 ![Training loss curves and test metrics across all 5 folds](../pairwise/sequential_drug_prediction/training_summary_2757168.png)
 
-**Table 1. Per-fold test metrics (compound-stratified 5-fold cross-validation).**
 
 | Fold | PCC (mean ± std) | Spearman (mean ± std) | R² (mean ± std) | RMSE | Prec@20 Up | Prec@20 Down |
 |---|---|---|---|---|---|---|
