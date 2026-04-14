@@ -135,6 +135,9 @@ The search was configured for 20 trials, each trained for up to 100 epochs with 
 
 Trial 1 was the best found, suggesting that lower dropout (0.029 vs. 0.071) and a slightly lower peak learning rate improve validation PCC. Both trials preferred `mse_weight=0.1` over the manually chosen 0.2, and both retained the default `CA+SA+SA+CA` perturbation encoder structure. The search did not complete enough trials to draw firm conclusions about `pcc_weight` or `trt_structure`, so the base configuration was used for the full 5-fold evaluation.
 
+A pattern observed from the trials conducted so far include:
+- Dropout matters more than expected, less dropout seems to result in better performance
+
 ### Results For Base Config
 
 | Category | Parameter | Value |
