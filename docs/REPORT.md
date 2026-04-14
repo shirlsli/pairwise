@@ -154,10 +154,10 @@ A pattern observed from the trials conducted so far include:
 | Model | `drug_input_hidden_dropout_prob` | 0.1 |
 | Model | `ctl_structure` | `SA+SA+SA+SA` |
 | Model | `trt_structure` | `CA+SA+SA+CA` |
-| Training | `learning_rate` | 4×10⁻³ |
+| Training | `learning_rate` | 5.6×10⁻³ |
 | Training | `mse_weight` | 0.2 |
 | Training | `pcc_weight` | 1.0 |
-| Training | `batch_size` | 128 |
+| Training | `batch_size` | 256 |
 | Training | `epochs` | 200 |
 | Training | `patience` | 50 |
 | Training | `warmup_epochs` | 70 |
