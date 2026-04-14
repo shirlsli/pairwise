@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from xpert_morgan import XPertMorgan, PerturbationDataset, evaluate_model, loss_fn
 from hyperparameter_search import run_hyperparameter_search
 import math
+import json
 
 def lr_lambda(epoch, warmup_epochs, args):
     if epoch < warmup_epochs:
@@ -253,13 +254,11 @@ def seq_pred_pipeline(args):
             all_splits, args.device, n_trials=args.n_trials,
             output_path='optuna_study.pkl', base_config=base_config
         )
-        args.hidden_size = best_params['hidden_size']
-        args.num_heads = best_params['num_heads']
-        args.ctl_structure = best_params['ctl_structure']
         args.trt_structure = best_params['trt_structure']
         args.learning_rate = best_params['learning_rate']
         args.mse_weight = best_params['mse_weight']
         args.pcc_weight = best_params['pcc_weight']
+        args.dropout = best_params['dropout']
         print(f"Best params found: {best_params}")
 
     if args.fold_idx is not None:
@@ -382,6 +381,7 @@ if __name__ == "__main__":
     parser.add_argument('--patience', type=int, default=50, help='Early stopping patience in epochs')
     parser.add_argument('--warm_start', action='store_true', help='Whether to warm start, default is cold-drug training from scratch')
     parser.add_argument('--fold_idx', type=int, default=None, help='Fold index for parallelization')
+    parser.add_argument('--resume', action='store_true', help='Resume training')
 
     # Model architecture
     parser.add_argument('--hidden_size', type=int, default=256)
@@ -392,6 +392,7 @@ if __name__ == "__main__":
     parser.add_argument('--mse_weight', type=float, default=0.2)
     parser.add_argument('--pcc_weight', type=float, default=1.0)
     parser.add_argument('--drug_hidden_dim', type=int, default=512)
+    parser.add_argument('--dropout', type=float, default=0.1)
 
     # Config file
     parser.add_argument('--config_path', type=str, default='/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/configs/config_lincs_l1000.json',

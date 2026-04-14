@@ -3,7 +3,7 @@
         "gene_num": 978,
         "n_bins": 128,
         "num_cell_id": 70,
-        "num_pert_time": 3
+        "num_pert_time": 6
     },
     "model": {
         "ATTN": {
