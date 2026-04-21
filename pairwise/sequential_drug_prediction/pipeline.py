@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from cmapPy.pandasGEXpress import parse_gctx
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models'))
 from xpert_morgan import XPertMorgan, PerturbationDataset, evaluate_model, loss_fn
-from hyperparameter_search import run_hyperparameter_search
+from hyperparameter_search import run_hyperparameter_search, seed_study
 import math
 import json
 
@@ -214,6 +214,12 @@ def seq_pred_pipeline(args):
     device = args.device
     os.makedirs(args.model_output_dir, exist_ok=True)
 
+    if args.seed_optuna:
+        if not args.optuna_storage:
+            raise ValueError("--seed_optuna requires --optuna_storage")
+        seed_study(args.optuna_storage)
+        return []
+
     if not os.path.exists(args.processed_data_dir):
         landmark_gene_ids = preprocess_data(args)
     else:
@@ -246,14 +252,23 @@ def seq_pred_pipeline(args):
                 pickle.dump(split, f)
             print(f"Saved fold {split['fold']} to {fold_path}")
 
-    if args.hyperparameter_search:
-        print("Running hyperparameter search...")
+    if args.hyperparameter_search or args.optuna_collect:
+        print("Running hyperparameter search..." if not args.optuna_collect else "Collecting hyperparameter search results...")
         with open(args.config_path, 'r') as f:
             base_config = json.load(f)
         best_params = run_hyperparameter_search(
             all_splits, args.device, n_trials=args.n_trials,
-            output_path='optuna_study.pkl', base_config=base_config
+            output_path='optuna_study.pkl', base_config=base_config,
+            storage_path=args.optuna_storage,
+            n_trials_per_worker=args.n_trials_per_worker,
+            collect_only=args.optuna_collect,
         )
+        if args.search_only:
+            print("Search-only mode: exiting without training folds.")
+            return []
+        if best_params is None:
+            print("No completed trials found; cannot train. Exiting.")
+            return []
         args.trt_structure = best_params['trt_structure']
         args.learning_rate = best_params['learning_rate']
         args.mse_weight = best_params['mse_weight']
@@ -401,6 +416,16 @@ if __name__ == "__main__":
     # Hyperparameter Search
     parser.add_argument('--hyperparameter_search', action='store_true', help='Run Optuna hyperparameter search before full CV')
     parser.add_argument('--n_trials', type=int, default=50, help='Number of Optuna trials')
+    parser.add_argument('--optuna_storage', type=str, default=None,
+        help='Path to Optuna JournalFile for parallel search (enables multi-worker mode)')
+    parser.add_argument('--n_trials_per_worker', type=int, default=None,
+        help='Trials this worker runs (parallel mode); omit to run all n_trials serially')
+    parser.add_argument('--search_only', action='store_true',
+        help='Run hyperparameter search then exit without training folds')
+    parser.add_argument('--optuna_collect', action='store_true',
+        help='Load best params from --optuna_storage and run training (no new search trials)')
+    parser.add_argument('--seed_optuna', action='store_true',
+        help='Seed --optuna_storage with previously completed trials then exit')
     parser.add_argument('--ppi_gene_vector_path', type=str,
         default='/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/perturbation_data/PPI_gene_vector_128d.npy',
         help='Path to pretrained PPI gene vector embeddings')

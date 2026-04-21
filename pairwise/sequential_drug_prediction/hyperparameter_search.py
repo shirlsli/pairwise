@@ -1,11 +1,76 @@
 import torch
 import optuna
+from optuna.trial import FrozenTrial, TrialState
 from torch.utils.data import DataLoader
 from xpert_morgan import XPertMorgan, PerturbationDataset, evaluate_model, loss_fn
 import numpy as np
 import os
 import pickle
 import json
+import datetime
+
+_SEARCH_DISTRIBUTIONS = {
+    'learning_rate': optuna.distributions.FloatDistribution(5.6e-3, 8e-3, log=True),
+    'trt_structure': optuna.distributions.CategoricalDistribution(['CA+SA+SA+CA', 'CA+SA+SA+SA+CA']),
+    'mse_weight':    optuna.distributions.CategoricalDistribution([0.1, 0.2, 0.5]),
+    'pcc_weight':    optuna.distributions.CategoricalDistribution([0.5, 1.0, 2.0]),
+    'dropout':       optuna.distributions.FloatDistribution(0.0, 0.1),
+}
+
+# Results from slurm-2788447 (cancelled after trial 1 due to time limit)
+_COMPLETED_TRIALS = [
+    {
+        'params': {'learning_rate': 0.006400369183564024, 'trt_structure': 'CA+SA+SA+CA',
+                   'mse_weight': 0.1, 'pcc_weight': 1.0, 'dropout': 0.07080725777960455},
+        'value': -0.6596710085868835,
+    },
+    {
+        'params': {'learning_rate': 0.005641266353618167, 'trt_structure': 'CA+SA+SA+CA',
+                   'mse_weight': 0.1, 'pcc_weight': 1.0, 'dropout': 0.029122914019804193},
+        'value': -0.6888753175735474,
+    },
+]
+
+
+def seed_study(storage_path):
+    """Populate a fresh study with the two trials already completed in the cancelled job.
+
+    Run this once before submitting the parallel array workers. Safe to call
+    again on an already-seeded study — it checks the existing trial count first.
+    """
+    storage = optuna.storages.JournalStorage(
+        optuna.storages.journal.JournalFileBackend(storage_path)
+    )
+    study = optuna.create_study(
+        study_name='hyperparameter_search',
+        direction='minimize',
+        sampler=optuna.samplers.TPESampler(seed=42),
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
+        storage=storage,
+        load_if_exists=True,
+    )
+    if study.trials:
+        print(f"Study already has {len(study.trials)} trial(s); skipping seed.")
+        return
+    now = datetime.datetime.now()
+    for i, entry in enumerate(_COMPLETED_TRIALS):
+        frozen = FrozenTrial(
+            number=i,
+            trial_id=-1,
+            state=TrialState.COMPLETE,
+            value=entry['value'],
+            values=None,
+            datetime_start=now,
+            datetime_complete=now,
+            params=entry['params'],
+            distributions=_SEARCH_DISTRIBUTIONS,
+            user_attrs={},
+            system_attrs={},
+            intermediate_values={},
+        )
+        study.add_trial(frozen)
+        print(f"Seeded trial {i}: PCC={-entry['value']:.4f}, params={entry['params']}")
+    print(f"Study seeded with {len(_COMPLETED_TRIALS)} completed trials.")
 
 def objective(trial, train_data, val_data, cell_id_to_idx, device, base_config):
     hidden_size = 256
@@ -50,7 +115,10 @@ def objective(trial, train_data, val_data, cell_id_to_idx, device, base_config):
 
     best_val_loss    = float('inf')
     patience_counter = 0
-    model_path       = f'optuna_trial_{trial.number}.pt'
+    model_path       = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        f'optuna_trial_{trial.number}.pt'
+    )
 
     for epoch in range(100):
         model.train()
@@ -106,7 +174,9 @@ def objective(trial, train_data, val_data, cell_id_to_idx, device, base_config):
 
 
 def run_hyperparameter_search(all_splits, device, n_trials=20,
-                               output_path='optuna_study.pkl', base_config=None):
+                               output_path='optuna_study.pkl', base_config=None,
+                               storage_path=None, n_trials_per_worker=None,
+                               collect_only=False):
     split = all_splits[0]
     train_data = split['train']
     val_data = split['val']
@@ -118,29 +188,54 @@ def run_hyperparameter_search(all_splits, device, n_trials=20,
     ]))
     cell_id_to_idx = {c: i for i, c in enumerate(all_cell_ids)}
 
+    if storage_path is not None:
+        storage = optuna.storages.JournalStorage(
+            optuna.storages.journal.JournalFileBackend(storage_path)
+        )
+        study_name = 'hyperparameter_search'
+        load_if_exists = True
+    else:
+        storage = None
+        study_name = None
+        load_if_exists = False
+
     study = optuna.create_study(
+        study_name=study_name,
         direction='minimize',
         sampler=optuna.samplers.TPESampler(seed=42),
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5)
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
+        storage=storage,
+        load_if_exists=load_if_exists,
     )
 
-    study.optimize(
-        lambda trial: objective(
-            trial, train_data, val_data, cell_id_to_idx, device, base_config),
-        n_trials=n_trials,
-        show_progress_bar=True
-    )
+    if not collect_only:
+        trials_to_run = n_trials_per_worker if n_trials_per_worker is not None else n_trials
+        study.optimize(
+            lambda trial: objective(
+                trial, train_data, val_data, cell_id_to_idx, device, base_config),
+            n_trials=trials_to_run,
+            show_progress_bar=(n_trials_per_worker is None),
+        )
 
-    print(f"\nCompleted trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])}")
-    print(f"Pruned trials:    {len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])}")
-    print(f"Failed trials:    {len([t for t in study.trials if t.state == optuna.trial.TrialState.FAIL])}")
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    pruned    = [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]
+    failed    = [t for t in study.trials if t.state == optuna.trial.TrialState.FAIL]
+
+    print(f"\nCompleted trials: {len(completed)}")
+    print(f"Pruned trials:    {len(pruned)}")
+    print(f"Failed trials:    {len(failed)}")
+
+    if not completed:
+        print("No completed trials found.")
+        return None
 
     print(f"\nBest trial:")
     print(f"  PCC: {-study.best_trial.value:.4f}")
     for k, v in study.best_trial.params.items():
         print(f"  {k}: {v}")
 
-    with open(output_path, 'wb') as f:
-        pickle.dump(study, f)
+    if collect_only or n_trials_per_worker is None:
+        with open(output_path, 'wb') as f:
+            pickle.dump(study, f)
 
     return study.best_trial.params
