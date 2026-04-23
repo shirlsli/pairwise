@@ -178,6 +178,20 @@ All five folds trained to completion (200 epochs) with no early stopping trigger
 | 4 | 0.6955 ± 0.1947 | 0.6829 ± 0.1952 | 0.4604 ± 0.3355 | 0.5345 | 0.4326 ± 0.1859 | 0.3741 ± 0.1710 |
 | **Mean** | **0.7013 ± 0.0046** | **0.6889 ± 0.0048** | **0.4678 ± 0.0072** | **0.5310 ± 0.0033** | **0.4398 ± 0.0055** | **0.3793 ± 0.0051** |
 
+Cross-validation results (5 folds):
+Mean PCC: 0.7013 ± 0.0046
+Median PCC: 0.7006
+Mean Spearman: 0.6889 ± 0.0048
+Median Spearman: 0.6885
+Mean R²: 0.4678 ± 0.0072
+Median R²: 0.4642
+Mean RMSE: 0.5310 ± 0.0033
+Median RMSE: 0.5305
+Mean Pos P@20: 0.4398 ± 0.0055
+Median Pos P@20: 0.4382
+Mean Neg P@20: 0.3793 ± 0.0051
+Median Neg P@20: 0.3771
+
 ## Citations
 
 Chen, X., Deng, Y., Yang, X. et al. Reinforcement learning-based design of sequential drug treatment targeting the evolving tumour landscape with SequenTx. Nat Mach Intell 8, 351–371 (2026). https://doi.org/10.1038/s42256-026-01192-1
