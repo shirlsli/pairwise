@@ -1,0 +1,29 @@
+{
+    "dataset": {
+        "gene_num": 978,
+        "n_bins": 128,
+        "num_cell_id": 70,
+        "num_pert_time": 6
+    },
+    "model": {
+        "ATTN": {
+            "hidden_size": 256,
+            "n_heads": 8,
+            "attention_probs_dropout_prob": 0.07080725777960455,
+            "hidden_dropout_prob": 0.07080725777960455,
+            "cell_input_hidden_dropout_prob": 0.07080725777960455,
+            "drug_input_hidden_dropout_prob": 0.07080725777960455,
+            "ppi_gene_vector_path": "/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/perturbation_data/PPI_gene_vector_128d.npy",
+            "ctl_structure": "SA+SA+SA+SA",
+            "trt_structure": "CA+SA+SA+CA"
+        }
+    },
+    "training": {
+        "learning_rate": 0.006400369183564024,
+        "mse_weight": 0.1,
+        "pcc_weight": 1.0,
+        "epochs": 200,
+        "batch_size": 256,
+        "patience": 20
+    }
+}

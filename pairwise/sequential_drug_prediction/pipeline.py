@@ -1,21 +1,21 @@
 import pandas as pd
 import numpy as np
 import torch
-import gzip
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from preprocess_lincs import preprocess_data, ensure_decompressed
-from train_val_test_split import train_val_test_split
+from train_val_test_split import encode_time_bins, train_val_test_split
 import argparse
 import pickle
 from torch.utils.data import DataLoader
 from cmapPy.pandasGEXpress import parse_gctx
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models'))
-from xpert_morgan import XPertMorgan, PerturbationDataset, evaluate_model, loss_fn
+from xpert_morgan import XPertMorgan, PerturbationDataset, evaluate_model, loss_fn, apply_binning
 from hyperparameter_search import run_hyperparameter_search, seed_study
 import math
 import json
+from preprocess_drugs import preprocess_drugs
 
 def lr_lambda(epoch, warmup_epochs, args):
     if epoch < warmup_epochs:
@@ -63,10 +63,10 @@ def train_fold(split, args, device):
             'ATTN': {
                 'hidden_size': args.hidden_size,
                 'n_heads': args.num_heads,
-                'attention_probs_dropout_prob': 0.1,
-                'hidden_dropout_prob': 0.1,
-                'cell_input_hidden_dropout_prob': 0.1,
-                'drug_input_hidden_dropout_prob': 0.1,
+                'attention_probs_dropout_prob': args.dropout,
+                'hidden_dropout_prob': args.dropout,
+                'cell_input_hidden_dropout_prob': args.dropout,
+                'drug_input_hidden_dropout_prob': args.dropout,
                 'ppi_gene_vector_path': args.ppi_gene_vector_path,
                 'ctl_structure': args.ctl_structure,
                 'trt_structure': args.trt_structure,
@@ -232,6 +232,18 @@ def seq_pred_pipeline(args):
         for i in range(5)
     ]
 
+    if args.inference:
+        print("Checking if combined drug-cell line info exists...")
+        if not os.path.exists(args.combine_drug_cell_line_path):
+            combine_path = combine_drug_cell_line(args.drug_list, args)
+            print("Saved combined drug-cell line info to:", combine_path)
+        else:
+            combine_path = args.combine_drug_cell_line_path
+        print("Running inference on drug pairs...")
+        inference(combine_path, args)
+        print("Inference complete.")
+        return
+
     if all(os.path.exists(p) for p in fold_paths):
         print("Loading existing folds from disk...")
         all_splits = []
@@ -275,6 +287,9 @@ def seq_pred_pipeline(args):
         args.pcc_weight = best_params['pcc_weight']
         args.dropout = best_params['dropout']
         print(f"Best params found: {best_params}")
+    
+    if args.collapse_pkl:
+        return all_splits, collapsed_path
 
     if args.fold_idx is not None:
         all_splits = [s for s in all_splits if s['fold'] == args.fold_idx]
@@ -311,52 +326,169 @@ def seq_pred_pipeline(args):
 
     return fold_results
 
-def inference(compounds_file_path):
-    with open(compounds_file_path, 'r') as f:
-        compounds = [line.strip() for line in f if line.strip()]
-    drug_fps = preprocess_drugs(compounds)
-    combos = {}
-    for drug_fp in drug_fps:
-        print(f"Predicting for drug fingerprint: {drug_fp}")
-        baseline = cell_line_baselines[cell_id].astype(np.float32)
-        delta_a = predict_delta(fp_a, baseline)
+def predict_ensemble(fp, current_expr, bin_edges, time_idx, cell_idx_val, models, device):
+    preds = [predict_delta(fp, current_expr, bin_edges, time_idx, cell_idx_val, m, device) for m in models]
+    return np.mean(preds, axis=0)
+
+
+def predict_delta(fingerprint, current_expr, bin_edges, time_idx, cell_idx_val, model, device):
+    current_binned = apply_binning(current_expr.reshape(1, -1), bin_edges).squeeze(0)
+    batch = (
+        torch.zeros(1, len(current_expr), dtype=torch.float32).to(device),
+        torch.tensor(current_expr, dtype=torch.float32).unsqueeze(0).to(device),
+        torch.tensor(current_binned, dtype=torch.long).unsqueeze(0).to(device),
+        torch.tensor(fingerprint, dtype=torch.float32).unsqueeze(0).to(device),
+        torch.tensor([time_idx], dtype=torch.long).to(device),
+        torch.tensor([cell_idx_val], dtype=torch.long).to(device),
+    )
+    with torch.no_grad():
+        outputs = model(batch)
+        _, _, deg_output, _, _, _, _, _ = outputs
+    return deg_output.squeeze(0).cpu().numpy()
+
+
+def inference(combine_path, args):
+    with open(args.processed_data_dir, 'rb') as f:
+        data = pickle.load(f)
+    combine = pd.read_csv(combine_path, sep='\t', header=None, names=['cell_id', 'compound', 'time_idx'])
+
+    all_cell_ids = sorted(np.unique(data['cell_ids']))
+    cell_id_to_idx = {c: i for i, c in enumerate(all_cell_ids)}
+
+    collapsed_path = args.processed_data_dir.replace('.pkl', '_collapsed.pkl')
+    with open(collapsed_path, 'rb') as f:
+        collapsed_data = pickle.load(f)
+    bin_edges = collapsed_data['bin_edges']
+    cell_line_baselines = collapsed_data.get('cell_line_baselines') or data.get('cell_line_baselines', {})
+    gene_num = next(iter(cell_line_baselines.values())).shape[0]
+
+    config = {
+        'dataset': {
+            'gene_num': gene_num,
+            'n_bins': args.n_bins,
+            'num_cell_id': len(cell_id_to_idx),
+            'num_pert_time': 6,
+        },
+        'model': {
+            'ATTN': {
+                'hidden_size': args.hidden_size,
+                'n_heads': args.num_heads,
+                'attention_probs_dropout_prob': args.dropout,
+                'hidden_dropout_prob': args.dropout,
+                'cell_input_hidden_dropout_prob': args.dropout,
+                'drug_input_hidden_dropout_prob': args.dropout,
+                'ppi_gene_vector_path': args.ppi_gene_vector_path,
+                'ctl_structure': args.ctl_structure,
+                'trt_structure': args.trt_structure,
+            }
+        }
+    }
+    models = []
+    for fold_idx in range(5):
+        model_path = os.path.join(args.inference_path, f"model_fold_{fold_idx}.pt")
+        if os.path.exists(model_path):
+            m = XPertMorgan(config, args.device)
+            m.load_state_dict(torch.load(model_path, map_location=args.device))
+            m.to(args.device)
+            m.eval()
+            models.append(m)
+    if not models:
+        raise FileNotFoundError(f"No fold models found in {args.inference_path}")
+    print(f"Loaded {len(models)} fold models for ensembling")
+
+    all_pert_ids = set(combine['compound'].tolist())
+    drug_fps_df = preprocess_drugs(format=args.drug_format, file_path=args.drug_info_path, pert_ids=all_pert_ids)
+    fp_lookup = {row['pert_id']: row['fp'] for _, row in drug_fps_df.iterrows()}
+
+
+    feature_vectors = {}
+    for row_a in combine.itertuples():
+        compound_a = row_a.compound
+        cell_id = row_a.cell_id
+        time_idx_a = int(row_a.time_idx)
+
+        fp_a = fp_lookup.get(compound_a)
+        if fp_a is None:
+            print(f"Warning: no fingerprint for {compound_a}, skipping")
+            continue
+        cell_idx_val = cell_id_to_idx.get(cell_id)
+        if cell_idx_val is None:
+            print(f"Warning: cell {cell_id} not in training data, skipping")
+            continue
+        baseline = cell_line_baselines.get(cell_id)
+        if baseline is None:
+            print(f"Warning: no baseline for cell {cell_id}, skipping")
+            continue
+        baseline = baseline.astype(np.float32)
+
+        print(f"Predicting for {compound_a} in cell line {cell_id} at time bin {time_idx_a}...")
+        delta_a = predict_ensemble(fp_a, baseline, bin_edges, time_idx_a, cell_idx_val, models, args.device)
         state_after_a = baseline + delta_a
 
-        for drug_b_fp in drug_fps:
-            if drug_b_fp != drug_fp:
-                delta_b = predict_delta(fp_b, state_after_a)
-                drug_b_pert_id = drug_fps[drug_b_fp]['pert_id']
-                state_after_b = state_after_a + delta_b
-                combos[pert_id][drug_b_pert_id] = {
-                    'baseline': baseline,
-                    'delta_a': delta_a,
-                    'state_after_a': state_after_a,
-                    'delta_b': delta_b,
-                    'state_after_b': state_after_b,
-                    'total_delta': state_after_b - baseline,
-                }
-    # take each pair and call cell viability model to infer cell viability, then rank pairs by predicted viability
+        feature_vectors[compound_a] = {}
+        for row_b in combine.itertuples():
+            compound_b = row_b.compound
+            if compound_b != compound_a:
+                time_idx_b = int(row_b.time_idx)
+                fp_b = fp_lookup.get(compound_b)
+                if fp_b is None:
+                    continue
+                delta_b = predict_ensemble(fp_b, state_after_a, bin_edges, time_idx_b, cell_idx_val, models, args.device)
+                feature_vectors[compound_a][compound_b] = compile_feature_vector(baseline, delta_a, delta_b, fp_a, fp_b)
 
-def predict_delta(fingerprint, current_expr):
-    """Run one forward pass given a fingerprint and current expression state."""
-    current_binned = apply_binning(
-        current_expr.reshape(1, -1), bin_edges
-    ).squeeze(0)
+    feature_vectors_path = os.path.join(args.inference_path, 'feature_vectors.pkl')
+    with open(feature_vectors_path, 'wb') as f:
+        pickle.dump(feature_vectors, f)
+    print(f"Saved feature vectors to {feature_vectors_path}")
+    return feature_vectors
 
-    batch = (
-        torch.zeros(1, current_expr.shape[0], dtype=torch.float32).to(device),      # trt_raw_data placeholder
-        torch.tensor(current_expr, dtype=torch.float32).unsqueeze(0).to(device),    # ctl_raw_data
-        torch.tensor(current_binned, dtype=torch.long).unsqueeze(0).to(device),     # ctl_raw_data_binned
-        torch.tensor(fingerprint, dtype=torch.float32).unsqueeze(0).to(device),     # drug_feat
-        torch.tensor([time_idx], dtype=torch.long).to(device),                      # pert_time_idx
-        torch.tensor([cell_idx_val], dtype=torch.long).to(device),                  # cell_idx
-    )
 
-    with torch.no_grad():
-        outputs = model(batch, output_attention=False)
-        _, _, deg_output, _, _, _, _, _ = outputs
+def compile_feature_vector(baseline, delta_a, delta_b, fp_a, fp_b):
+    prod = delta_a * delta_b
+    diff = np.abs(delta_a - delta_b)
+    return np.concatenate([baseline, delta_a, delta_b, prod, diff, fp_a, fp_b])
 
-    return deg_output.squeeze(0).cpu().numpy()
+
+TIME_BIN_EDGES = np.array([0, 3, 6, 12, 24, 48, 72])
+
+def combine_drug_cell_line(list_path, args):
+    with open(list_path, 'r') as f:
+        compounds = [line.strip() for line in f if line.strip()]
+    with open(args.processed_data_dir, 'rb') as f:
+        data = pickle.load(f)
+    print(data.keys())
+
+    drug_names = data['drug_names']
+    cell_ids = data['cell_ids']
+    time_idxs = encode_time_bins(np.array(data['durations'], dtype=np.float32))
+
+    drug_to_info = {}
+    for drug, cell, time in zip(drug_names, cell_ids, time_idxs):
+        drug_lower = drug.lower()
+        if drug_lower not in drug_to_info:
+            drug_to_info[drug_lower] = {'cells': [], 'times': []}
+        drug_to_info[drug_lower]['cells'].append(cell)
+        drug_to_info[drug_lower]['times'].append(time)
+
+    drug_to_info = {
+        drug: {
+            'cell_id':  max(set(v['cells']), key=v['cells'].count),
+            'time_idx': max(set(v['times']), key=v['times'].count),
+        }
+        for drug, v in drug_to_info.items()
+    }
+    output_path = list_path.replace('.txt', '_with_cell_lines.tsv')
+    missing = []
+    with open(output_path, 'w') as f:
+        for compound in compounds:
+            compound_lower = compound.lower()
+            if compound_lower in drug_to_info:
+                info = drug_to_info[compound_lower]
+                f.write(f"{info['cell_id']}\t{compound}\t{info['time_idx']}\n")
+            else:
+                missing.append(compound)
+    print(f"Saved {len(compounds) - len(missing)} entries to {output_path}")
+    return output_path
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -387,6 +519,7 @@ if __name__ == "__main__":
         default=[9, 10, 11])
     parser.add_argument('--use_cd', action='store_true')
     parser.add_argument('--cell_line_consensus', action='store_true')
+    parser.add_argument('--collapse_pkl', action='store_true', help='Whether to save a collapsed version of the processed data with only landmark genes and bin edges (for inference)')
 
     # Training
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
@@ -429,21 +562,30 @@ if __name__ == "__main__":
     parser.add_argument('--ppi_gene_vector_path', type=str,
         default='/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/perturbation_data/PPI_gene_vector_128d.npy',
         help='Path to pretrained PPI gene vector embeddings')
+    
+
+    parser.add_argument('--inference', action='store_true', help='Run inference on drug pairs instead of training')
+    parser.add_argument('--inference_path', type=str, default="/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_parallel",
+        help='Path to best model for inference')
+    parser.add_argument('--drug_list', type=str, default="/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/targeted_drug_list.txt",
+        help='Path to text file with list of compounds to run inference on')
+    parser.add_argument('--combine_drug_cell_line_path', type=str, default="/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/targeted_drug_list_with_cell_lines.tsv",
+        help='Path to tsv file with columns cell_id, compound, time_idx')
 
     # First pass: get config_path only, then apply JSON values as defaults
     pre, _ = parser.parse_known_args()
     if pre.config_path:
-        import json
         with open(pre.config_path) as f:
             cfg = json.load(f)
         attn = cfg.get('model', {}).get('ATTN', {})
-        ds   = cfg.get('dataset', {})
+        ds = cfg.get('dataset', {})
+        tr = cfg.get('training', {})
         overrides = {}
         if 'n_bins' in ds:
             overrides['n_bins'] = ds['n_bins']
         if 'hidden_size' in attn:
             overrides['hidden_size'] = attn['hidden_size']
-        if 'n_heads'in attn:
+        if 'n_heads' in attn:
             overrides['num_heads'] = attn['n_heads']
         if 'ctl_structure' in attn:
             overrides['ctl_structure'] = attn['ctl_structure']
@@ -451,6 +593,20 @@ if __name__ == "__main__":
             overrides['trt_structure'] = attn['trt_structure']
         if 'ppi_gene_vector_path' in attn:
             overrides['ppi_gene_vector_path'] = attn['ppi_gene_vector_path']
+        if 'attention_probs_dropout_prob' in attn:
+            overrides['dropout'] = attn['attention_probs_dropout_prob']
+        if 'learning_rate' in tr:
+            overrides['learning_rate'] = tr['learning_rate']
+        if 'mse_weight' in tr:
+            overrides['mse_weight'] = tr['mse_weight']
+        if 'pcc_weight' in tr:
+            overrides['pcc_weight'] = tr['pcc_weight']
+        if 'epochs' in tr:
+            overrides['epochs'] = tr['epochs']
+        if 'batch_size' in tr:
+            overrides['batch_size'] = tr['batch_size']
+        if 'patience' in tr:
+            overrides['patience'] = tr['patience']
         parser.set_defaults(**overrides)
 
     args = parser.parse_args()
