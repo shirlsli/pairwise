@@ -1,0 +1,107 @@
+Loading existing folds from disk...
+Running hyperparameter search...
+[I 2026-04-21 15:37:32,145] Using an existing study with name 'hyperparameter_search' instead of creating a new one.
+Epoch 1/100 - Train Loss: 4.3149 - Val Loss: 0.7615
+Epoch 2/100 - Train Loss: 0.7796 - Val Loss: 0.7057
+Epoch 3/100 - Train Loss: 0.7401 - Val Loss: 0.6825
+Epoch 4/100 - Train Loss: 0.7226 - Val Loss: 0.6905
+Epoch 5/100 - Train Loss: 0.7309 - Val Loss: 0.6877
+Epoch 6/100 - Train Loss: 0.7365 - Val Loss: 0.6816
+Epoch 7/100 - Train Loss: 0.7102 - Val Loss: 0.6831
+Epoch 8/100 - Train Loss: 0.7031 - Val Loss: 0.6656
+Epoch 9/100 - Train Loss: 0.7449 - Val Loss: 0.7026
+Epoch 10/100 - Train Loss: 0.7185 - Val Loss: 0.6653
+Epoch 11/100 - Train Loss: 0.6880 - Val Loss: 0.6443
+Epoch 12/100 - Train Loss: 0.6777 - Val Loss: 0.6367
+Epoch 13/100 - Train Loss: 0.6620 - Val Loss: 0.6236
+Epoch 14/100 - Train Loss: 0.6507 - Val Loss: 0.6112
+Epoch 15/100 - Train Loss: 0.6380 - Val Loss: 0.6018
+Epoch 16/100 - Train Loss: 0.6294 - Val Loss: 0.5944
+Epoch 17/100 - Train Loss: 0.6229 - Val Loss: 0.5895
+Epoch 18/100 - Train Loss: 0.6166 - Val Loss: 0.5860
+Epoch 19/100 - Train Loss: 0.6098 - Val Loss: 0.5781
+Epoch 20/100 - Train Loss: 0.6056 - Val Loss: 0.5734
+Epoch 21/100 - Train Loss: 0.6009 - Val Loss: 0.5715
+Epoch 22/100 - Train Loss: 0.5961 - Val Loss: 0.5666
+Epoch 23/100 - Train Loss: 0.5899 - Val Loss: 0.5617
+Epoch 24/100 - Train Loss: 0.5834 - Val Loss: 0.5563
+Epoch 25/100 - Train Loss: 0.5799 - Val Loss: 0.5505
+Epoch 26/100 - Train Loss: 0.5732 - Val Loss: 0.5472
+Epoch 27/100 - Train Loss: 0.5688 - Val Loss: 0.5409
+Epoch 28/100 - Train Loss: 0.5621 - Val Loss: 0.5370
+Epoch 29/100 - Train Loss: 0.5575 - Val Loss: 0.5346
+Epoch 30/100 - Train Loss: 0.5530 - Val Loss: 0.5280
+Epoch 31/100 - Train Loss: 0.5464 - Val Loss: 0.5236
+Epoch 32/100 - Train Loss: 0.5413 - Val Loss: 0.5204
+Epoch 33/100 - Train Loss: 0.5362 - Val Loss: 0.5134
+Epoch 34/100 - Train Loss: 0.5290 - Val Loss: 0.5090
+Epoch 35/100 - Train Loss: 0.5238 - Val Loss: 0.5050
+Epoch 36/100 - Train Loss: 0.5185 - Val Loss: 0.4986
+Epoch 37/100 - Train Loss: 0.5133 - Val Loss: 0.4940
+Epoch 38/100 - Train Loss: 0.5076 - Val Loss: 0.4925
+Epoch 39/100 - Train Loss: 0.5059 - Val Loss: 0.4868
+Epoch 40/100 - Train Loss: 0.5025 - Val Loss: 0.4838
+Epoch 41/100 - Train Loss: 0.4976 - Val Loss: 0.4801
+Epoch 42/100 - Train Loss: 0.4952 - Val Loss: 0.4785
+Epoch 43/100 - Train Loss: 0.4922 - Val Loss: 0.4725
+Epoch 44/100 - Train Loss: 0.4877 - Val Loss: 0.4681
+Epoch 45/100 - Train Loss: 0.4827 - Val Loss: 0.4630
+Epoch 46/100 - Train Loss: 0.4781 - Val Loss: 0.4593
+Epoch 47/100 - Train Loss: 0.4749 - Val Loss: 0.4582
+Epoch 48/100 - Train Loss: 0.4745 - Val Loss: 0.4568
+Epoch 49/100 - Train Loss: 0.4720 - Val Loss: 0.4537
+Epoch 50/100 - Train Loss: 0.4678 - Val Loss: 0.4489
+Epoch 51/100 - Train Loss: 0.4640 - Val Loss: 0.4478
+Epoch 52/100 - Train Loss: 0.4612 - Val Loss: 0.4427
+Epoch 53/100 - Train Loss: 0.4588 - Val Loss: 0.4427
+Epoch 54/100 - Train Loss: 0.4568 - Val Loss: 0.4405
+Epoch 55/100 - Train Loss: 0.4536 - Val Loss: 0.4370
+Epoch 56/100 - Train Loss: 0.4517 - Val Loss: 0.4372
+Epoch 57/100 - Train Loss: 0.4512 - Val Loss: 0.4331
+Epoch 58/100 - Train Loss: 0.4497 - Val Loss: 0.4324
+Epoch 59/100 - Train Loss: 0.4488 - Val Loss: 0.4307
+Epoch 60/100 - Train Loss: 0.4446 - Val Loss: 0.4276
+Epoch 61/100 - Train Loss: 0.4411 - Val Loss: 0.4236
+Epoch 62/100 - Train Loss: 0.4385 - Val Loss: 0.4225
+Epoch 63/100 - Train Loss: 0.4359 - Val Loss: 0.4214
+Epoch 64/100 - Train Loss: 0.4333 - Val Loss: 0.4166
+Epoch 65/100 - Train Loss: 0.4326 - Val Loss: 0.4169
+Epoch 66/100 - Train Loss: 0.4293 - Val Loss: 0.4124
+Epoch 67/100 - Train Loss: 0.4256 - Val Loss: 0.4090
+Epoch 68/100 - Train Loss: 0.4240 - Val Loss: 0.4103
+Epoch 69/100 - Train Loss: 0.4242 - Val Loss: 0.4091
+Epoch 70/100 - Train Loss: 0.4228 - Val Loss: 0.4054
+Epoch 71/100 - Train Loss: 0.4234 - Val Loss: 0.4074
+Epoch 72/100 - Train Loss: 0.4215 - Val Loss: 0.4060
+Epoch 73/100 - Train Loss: 0.4231 - Val Loss: 0.4037
+Epoch 74/100 - Train Loss: 0.4185 - Val Loss: 0.4013
+Epoch 75/100 - Train Loss: 0.4154 - Val Loss: 0.3986
+Epoch 76/100 - Train Loss: 0.4115 - Val Loss: 0.3958
+Epoch 77/100 - Train Loss: 0.4110 - Val Loss: 0.3975
+Epoch 78/100 - Train Loss: 0.4116 - Val Loss: 0.3944
+Epoch 79/100 - Train Loss: 0.4110 - Val Loss: 0.3944
+Epoch 80/100 - Train Loss: 0.4130 - Val Loss: 0.3944
+Epoch 81/100 - Train Loss: 0.4174 - Val Loss: 0.3935
+Epoch 82/100 - Train Loss: 0.4115 - Val Loss: 0.3940
+Epoch 83/100 - Train Loss: 0.4077 - Val Loss: 0.3927
+Epoch 84/100 - Train Loss: 0.4076 - Val Loss: 0.3888
+Epoch 85/100 - Train Loss: 0.4059 - Val Loss: 0.3909
+Epoch 86/100 - Train Loss: 0.4095 - Val Loss: 0.3901
+Epoch 87/100 - Train Loss: 0.4054 - Val Loss: 0.3866
+Epoch 88/100 - Train Loss: 0.4028 - Val Loss: 0.3850
+Epoch 89/100 - Train Loss: 0.4009 - Val Loss: 0.3844
+Trial 8 pruned at epoch 89
+[I 2026-04-22 06:16:41,533] Trial 8 pruned. 
+
+Completed trials: 5
+Pruned trials:    3
+Failed trials:    1
+
+Best trial:
+  PCC: 0.6747
+  learning_rate: 0.006400369183564024
+  trt_structure: CA+SA+SA+CA
+  mse_weight: 0.1
+  pcc_weight: 1.0
+  dropout: 0.07080725777960455
+Search-only mode: exiting without training folds.

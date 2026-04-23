@@ -1,0 +1,35 @@
+Loading existing folds from disk...
+Running hyperparameter search...
+[I 2026-04-22 06:19:09,704] Using an existing study with name 'hyperparameter_search' instead of creating a new one.
+Epoch 1/100 - Train Loss: 4.1524 - Val Loss: 0.7633
+Epoch 2/100 - Train Loss: 0.7756 - Val Loss: 0.6960
+Epoch 3/100 - Train Loss: 0.7222 - Val Loss: 0.6703
+Epoch 4/100 - Train Loss: 0.7208 - Val Loss: 0.6903
+Epoch 5/100 - Train Loss: 0.7493 - Val Loss: 0.6990
+Epoch 6/100 - Train Loss: 0.7413 - Val Loss: 0.6956
+Epoch 7/100 - Train Loss: 0.7230 - Val Loss: 0.6909
+Epoch 8/100 - Train Loss: 0.7332 - Val Loss: 0.6906
+Epoch 9/100 - Train Loss: 0.7201 - Val Loss: 0.6708
+Epoch 10/100 - Train Loss: 0.7079 - Val Loss: 0.6587
+Epoch 11/100 - Train Loss: 0.6935 - Val Loss: 0.6484
+Epoch 12/100 - Train Loss: 0.6724 - Val Loss: 0.6268
+Epoch 13/100 - Train Loss: 0.6574 - Val Loss: 0.6155
+Epoch 14/100 - Train Loss: 0.6408 - Val Loss: 0.6009
+Epoch 15/100 - Train Loss: 0.6316 - Val Loss: 0.5969
+Epoch 16/100 - Train Loss: 0.6247 - Val Loss: 0.5916
+Epoch 17/100 - Train Loss: 0.6182 - Val Loss: 0.5851
+Trial 10 pruned at epoch 17
+[I 2026-04-22 09:08:07,697] Trial 10 pruned. 
+
+Completed trials: 5
+Pruned trials:    4
+Failed trials:    1
+
+Best trial:
+  PCC: 0.6747
+  learning_rate: 0.006400369183564024
+  trt_structure: CA+SA+SA+CA
+  mse_weight: 0.1
+  pcc_weight: 1.0
+  dropout: 0.07080725777960455
+Search-only mode: exiting without training folds.

@@ -1,0 +1,126 @@
+Loading existing folds from disk...
+Running hyperparameter search...
+[I 2026-04-20 21:02:18,625] A new study created in Journal with name: hyperparameter_search
+Epoch 1/100 - Train Loss: 3.3329 - Val Loss: 0.7572
+Epoch 2/100 - Train Loss: 0.7764 - Val Loss: 0.7054
+Epoch 3/100 - Train Loss: 0.7403 - Val Loss: 0.6788
+Epoch 4/100 - Train Loss: 0.7335 - Val Loss: 0.6886
+Epoch 5/100 - Train Loss: 0.7586 - Val Loss: 0.7238
+Epoch 6/100 - Train Loss: 0.7384 - Val Loss: 0.6969
+Epoch 7/100 - Train Loss: 0.7330 - Val Loss: 0.6986
+Epoch 8/100 - Train Loss: 0.7192 - Val Loss: 0.6810
+Epoch 9/100 - Train Loss: 0.7112 - Val Loss: 0.6750
+Epoch 10/100 - Train Loss: 0.6955 - Val Loss: 0.6583
+Epoch 11/100 - Train Loss: 0.6869 - Val Loss: 0.6497
+Epoch 12/100 - Train Loss: 0.6676 - Val Loss: 0.6300
+Epoch 13/100 - Train Loss: 0.6538 - Val Loss: 0.6135
+Epoch 14/100 - Train Loss: 0.6388 - Val Loss: 0.6014
+Epoch 15/100 - Train Loss: 0.6275 - Val Loss: 0.5975
+Epoch 16/100 - Train Loss: 0.6196 - Val Loss: 0.5870
+Epoch 17/100 - Train Loss: 0.6130 - Val Loss: 0.5833
+Epoch 18/100 - Train Loss: 0.6079 - Val Loss: 0.5790
+Epoch 19/100 - Train Loss: 0.6044 - Val Loss: 0.5781
+Epoch 20/100 - Train Loss: 0.6018 - Val Loss: 0.5722
+Epoch 21/100 - Train Loss: 0.5944 - Val Loss: 0.5627
+Epoch 22/100 - Train Loss: 0.5892 - Val Loss: 0.5621
+Epoch 23/100 - Train Loss: 0.5836 - Val Loss: 0.5584
+Epoch 24/100 - Train Loss: 0.5776 - Val Loss: 0.5562
+Epoch 25/100 - Train Loss: 0.5725 - Val Loss: 0.5480
+Epoch 26/100 - Train Loss: 0.5690 - Val Loss: 0.5506
+Epoch 27/100 - Train Loss: 0.5660 - Val Loss: 0.5468
+Epoch 28/100 - Train Loss: 0.5619 - Val Loss: 0.5423
+Epoch 29/100 - Train Loss: 0.5587 - Val Loss: 0.5392
+Epoch 30/100 - Train Loss: 0.5523 - Val Loss: 0.5336
+Epoch 31/100 - Train Loss: 0.5490 - Val Loss: 0.5310
+Epoch 32/100 - Train Loss: 0.5438 - Val Loss: 0.5262
+Epoch 33/100 - Train Loss: 0.5381 - Val Loss: 0.5219
+Epoch 34/100 - Train Loss: 0.5328 - Val Loss: 0.5145
+Epoch 35/100 - Train Loss: 0.5265 - Val Loss: 0.5105
+Epoch 36/100 - Train Loss: 0.5220 - Val Loss: 0.5065
+Epoch 37/100 - Train Loss: 0.5173 - Val Loss: 0.5012
+Epoch 38/100 - Train Loss: 0.5115 - Val Loss: 0.4967
+Epoch 39/100 - Train Loss: 0.5057 - Val Loss: 0.4915
+Epoch 40/100 - Train Loss: 0.5029 - Val Loss: 0.4906
+Epoch 41/100 - Train Loss: 0.4978 - Val Loss: 0.4826
+Epoch 42/100 - Train Loss: 0.4913 - Val Loss: 0.4780
+Epoch 43/100 - Train Loss: 0.4872 - Val Loss: 0.4757
+Epoch 44/100 - Train Loss: 0.4867 - Val Loss: 0.4703
+Epoch 45/100 - Train Loss: 0.4800 - Val Loss: 0.4650
+Epoch 46/100 - Train Loss: 0.4753 - Val Loss: 0.4622
+Epoch 47/100 - Train Loss: 0.4695 - Val Loss: 0.4555
+Epoch 48/100 - Train Loss: 0.4653 - Val Loss: 0.4526
+Epoch 49/100 - Train Loss: 0.4633 - Val Loss: 0.4509
+Epoch 50/100 - Train Loss: 0.4587 - Val Loss: 0.4456
+Epoch 51/100 - Train Loss: 0.4552 - Val Loss: 0.4433
+Epoch 52/100 - Train Loss: 0.4532 - Val Loss: 0.4396
+Epoch 53/100 - Train Loss: 0.4520 - Val Loss: 0.4366
+Epoch 54/100 - Train Loss: 0.4464 - Val Loss: 0.4336
+Epoch 55/100 - Train Loss: 0.4436 - Val Loss: 0.4321
+Epoch 56/100 - Train Loss: 0.4395 - Val Loss: 0.4259
+Epoch 57/100 - Train Loss: 0.4363 - Val Loss: 0.4255
+Epoch 58/100 - Train Loss: 0.4346 - Val Loss: 0.4223
+Epoch 59/100 - Train Loss: 0.4340 - Val Loss: 0.4245
+Epoch 60/100 - Train Loss: 0.4351 - Val Loss: 0.4215
+Epoch 61/100 - Train Loss: 0.4333 - Val Loss: 0.4205
+Epoch 62/100 - Train Loss: 0.4317 - Val Loss: 0.4167
+Epoch 63/100 - Train Loss: 0.4284 - Val Loss: 0.4162
+Epoch 64/100 - Train Loss: 0.4255 - Val Loss: 0.4104
+Epoch 65/100 - Train Loss: 0.4202 - Val Loss: 0.4069
+Epoch 66/100 - Train Loss: 0.4183 - Val Loss: 0.4037
+Epoch 67/100 - Train Loss: 0.4151 - Val Loss: 0.4011
+Epoch 68/100 - Train Loss: 0.4123 - Val Loss: 0.4011
+Epoch 69/100 - Train Loss: 0.4112 - Val Loss: 0.4242
+Epoch 70/100 - Train Loss: 0.4155 - Val Loss: 0.3987
+Epoch 71/100 - Train Loss: 0.4138 - Val Loss: 0.3994
+Epoch 72/100 - Train Loss: 0.4106 - Val Loss: 0.3962
+Epoch 73/100 - Train Loss: 0.4093 - Val Loss: 0.3966
+Epoch 74/100 - Train Loss: 0.4094 - Val Loss: 0.4030
+Epoch 75/100 - Train Loss: 0.4192 - Val Loss: 0.3998
+Epoch 76/100 - Train Loss: 0.4174 - Val Loss: 0.4049
+Epoch 77/100 - Train Loss: 0.4176 - Val Loss: 0.3955
+Epoch 78/100 - Train Loss: 0.4148 - Val Loss: 0.3916
+Epoch 79/100 - Train Loss: 0.4081 - Val Loss: 0.3911
+Epoch 80/100 - Train Loss: 0.4085 - Val Loss: 0.3897
+Epoch 81/100 - Train Loss: 0.4056 - Val Loss: 0.3889
+Epoch 82/100 - Train Loss: 0.4045 - Val Loss: 0.3884
+Epoch 83/100 - Train Loss: 0.4024 - Val Loss: 0.3864
+Epoch 84/100 - Train Loss: 0.4013 - Val Loss: 0.3861
+Epoch 85/100 - Train Loss: 0.4003 - Val Loss: 0.3838
+Epoch 86/100 - Train Loss: 0.3983 - Val Loss: 0.3811
+Epoch 87/100 - Train Loss: 0.3982 - Val Loss: 0.3814
+Epoch 88/100 - Train Loss: 0.3966 - Val Loss: 0.3798
+Epoch 89/100 - Train Loss: 0.3953 - Val Loss: 0.3814
+Epoch 90/100 - Train Loss: 0.3954 - Val Loss: 0.3793
+Epoch 91/100 - Train Loss: 0.3923 - Val Loss: 0.3779
+Epoch 92/100 - Train Loss: 0.3919 - Val Loss: 0.3773
+Epoch 93/100 - Train Loss: 0.3908 - Val Loss: 0.3751
+Epoch 94/100 - Train Loss: 0.3915 - Val Loss: 0.3760
+Epoch 95/100 - Train Loss: 0.3893 - Val Loss: 0.3745
+Epoch 96/100 - Train Loss: 0.3880 - Val Loss: 0.3733
+Epoch 97/100 - Train Loss: 0.3879 - Val Loss: 0.3732
+Epoch 98/100 - Train Loss: 0.3856 - Val Loss: 0.3720
+Epoch 99/100 - Train Loss: 0.3836 - Val Loss: 0.3710
+Epoch 100/100 - Train Loss: 0.3837 - Val Loss: 0.3753
+/athena/cayuga_0019/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/hyperparameter_search.py:166: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  model.load_state_dict(torch.load(model_path, map_location=device))
+Mean PCC: 0.6615 ± 0.2095
+Median PCC: 0.7182
+Mean Spearman: 0.6461 ± 0.2094
+Mean R²: 0.3816 ± 0.3676
+RMSE: 0.5693
+Mean Most Upregulated 20 Genes: 0.4083 ± 0.1837
+Mean Most Downregulated 20 Genes: 0.3479 ± 0.1681
+[I 2026-04-21 13:34:08,853] Trial 0 finished with value: -0.6614579558372498 and parameters: {'learning_rate': 0.006400369183564024, 'trt_structure': 'CA+SA+SA+CA', 'mse_weight': 0.1, 'pcc_weight': 1.0, 'dropout': 0.07080725777960455}. Best is trial 2 with value: -0.6746574640274048.
+
+Completed trials: 4
+Pruned trials:    0
+Failed trials:    0
+
+Best trial:
+  PCC: 0.6747
+  learning_rate: 0.006400369183564024
+  trt_structure: CA+SA+SA+CA
+  mse_weight: 0.1
+  pcc_weight: 1.0
+  dropout: 0.07080725777960455
+Search-only mode: exiting without training folds.

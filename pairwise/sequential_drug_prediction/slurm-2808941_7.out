@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/athena/cayuga_0019/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/pipeline.py", line 19, in <module>
+    from cell_line_baselines import compute_cell_line_baselines
+ModuleNotFoundError: No module named 'cell_line_baselines'
