@@ -1,0 +1,16 @@
+==================================================
+Cross-validation results (5 folds):
+Mean PCC: 0.7028 ± 0.0095
+Median PCC: 0.7038
+Mean Spearman: 0.6905 ± 0.0101
+Median Spearman: 0.6917
+Mean R²: 0.4597 ± 0.0222
+Median R²: 0.4652
+Mean RMSE: 0.5337 ± 0.0082
+Median RMSE: 0.5341
+Mean Pos P@20: 0.4428 ± 0.0094
+Median Pos P@20: 0.4441
+Mean Neg P@20: 0.3810 ± 0.0103
+Median Neg P@20: 0.3804
+==================================================
+Results saved to /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_optuna/results_summary.txt
