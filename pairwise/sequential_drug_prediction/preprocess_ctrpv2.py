@@ -16,14 +16,6 @@ def _read_zip_tsv(zf, name):
 
 
 def preprocess_ctrpv2(args):
-    """
-    Generates (X, Y) for a cell viability regression model:
-      X = delta gene expression (LINCS treatment - plate-matched DMSO control)
-      Y = cpd_avg_pv (CTRP cell viability fraction)
-
-    LINCS and CTRP samples are linked via shared broad_cpd_id and nearest
-    log10 concentration (within max_log10_conc_delta).
-    """
     print('Loading CTRPv2 data...')
     with zipfile.ZipFile(args.ctrpv2_zip) as zf:
         ctrp_raw = _read_zip_tsv(zf, 'v20.data.per_cpd_post_qc.txt')
@@ -31,7 +23,6 @@ def preprocess_ctrpv2(args):
         compound_info = _read_zip_tsv(zf, 'v20.meta.per_compound.txt')
         exp_info = _read_zip_tsv(zf, 'v20.meta.per_experiment.txt')
 
-    # Join CTRP metadata: ccl_name and broad_cpd_id per viability row
     exp_info = exp_info.drop_duplicates(['experiment_id', 'master_ccl_id'])
     exp_info = exp_info.set_index('experiment_id')
     cell_info = cell_info.set_index('master_ccl_id')
@@ -52,6 +43,7 @@ def preprocess_ctrpv2(args):
     )
     ctrp_cells = set(ctrp['ccl_name'])
     ctrp_compounds = set(ctrp['broad_cpd_id'])
+
     mask = (
         inst_info['cell_id'].isin(ctrp_cells) &
         inst_info['pert_id'].isin(ctrp_compounds) &
@@ -60,6 +52,20 @@ def preprocess_ctrpv2(args):
     inst_lincs = inst_info[mask].copy()
     inst_lincs['pert_dose'] = pd.to_numeric(inst_lincs['pert_dose'], errors='coerce')
     inst_lincs = inst_lincs[inst_lincs['pert_dose'] > 0].copy()
+
+    before = len(inst_lincs)
+    inst_lincs = inst_lincs[
+        (inst_lincs['pert_dose'] >= args.conc_min) &
+        (inst_lincs['pert_dose'] <= args.conc_max)
+    ].reset_index(drop=True)
+    print(f'Concentration filtering ({args.conc_min}-{args.conc_max} uM): '
+          f'{before} -> {len(inst_lincs)} samples')
+
+    inst_lincs = inst_lincs[
+        inst_lincs['pert_time'].isin(args.pert_times)
+    ].reset_index(drop=True)
+    print(f'After timepoint filtering {args.pert_times}: {len(inst_lincs)} samples')
+
     inst_lincs['log10_dose'] = np.log10(inst_lincs['pert_dose'])
     print(f'LINCS samples with CTRP match: {len(inst_lincs)}')
 
@@ -82,6 +88,9 @@ def preprocess_ctrpv2(args):
     inst_lincs = inst_lincs.dropna(subset=['cpd_avg_pv']).reset_index(drop=True)
     print(f'{len(inst_lincs)} LINCS samples with a matched CTRP viability')
 
+    time_counts = inst_lincs['pert_time'].value_counts().sort_index()
+    print(f'Timepoint distribution:\n{time_counts}')
+
     print('Extracting LINCS expression profiles...')
     gctx_path = ensure_decompressed(args.train_path)
     landmark_genes_df = pd.read_table(
@@ -96,18 +105,17 @@ def preprocess_ctrpv2(args):
     all_dmso_ids = inst_info[inst_info['pert_id'] == 'DMSO']['inst_id'].tolist()
     all_ids = list(set(inst_lincs['inst_id'].tolist() + all_dmso_ids))
     gctx_data = parse_gctx.parse(gctx_path, cid=all_ids, rid=landmark_gene_ids)
-    expr = gctx_data.data_df  # (genes, samples)
+    expr = gctx_data.data_df
 
     print('Computing cell line consensus baselines from all DMSO replicates...')
     cell_line_baselines = compute_cell_line_baselines(inst_info, expr, landmark_gene_ids)
 
     inst_lincs = inst_lincs[inst_lincs['cell_id'].isin(cell_line_baselines)].reset_index(drop=True)
 
-    trt_expr = expr[inst_lincs['inst_id'].tolist()].values.T  # (N, genes)
-    ctl_expr = np.stack(
-        [cell_line_baselines[cid] for cid in inst_lincs['cell_id']], axis=0
-    )
-    delta_expr = (trt_expr - ctl_expr).astype(np.float32)
+    trt_expr = expr[inst_lincs['inst_id'].tolist()].values.T.astype(np.float32)
+
+    ctl_expr = np.stack([cell_line_baselines[cid] for cid in inst_lincs['cell_id']], axis=0).astype(np.float32)
+    delta_expr = trt_expr - ctl_expr
     print(f'Delta expression shape: {delta_expr.shape}')
 
     print('Computing drug fingerprints...')
@@ -121,46 +129,71 @@ def preprocess_ctrpv2(args):
     has_fp = inst_lincs['pert_id'].isin(drugs_df.index).values
     inst_lincs = inst_lincs[has_fp].reset_index(drop=True)
     delta_expr = delta_expr[has_fp]
+    ctl_expr = ctl_expr[has_fp]
 
-    fp_dim = 167 if args.drug_format == 'maccs' else 1024
+    if args.drug_format == 'maccs':
+        fp_dim = 166
+    else:
+        fp_dim = 1024
+
     n = len(inst_lincs)
     drug_fp = np.zeros((n, fp_dim), dtype=np.float32)
     for i, pid in enumerate(inst_lincs['pert_id']):
-        drug_fp[i] = drugs_df.loc[pid, 'fp']
+        fp = drugs_df.loc[pid, 'fp']
+        drug_fp[i] = fp
+
+    print(f'Final dataset: {n} samples')
+    print(f'  Delta expression: {delta_expr.shape}')
+    print(f'  Drug fingerprints: {drug_fp.shape}')
+    print(f'  Unique cell lines: {inst_lincs["cell_id"].nunique()}')
+    print(f'  Unique drugs: {inst_lincs["pert_id"].nunique()}')
+    print(f'  Timepoints: {sorted(inst_lincs["pert_time"].unique())}')
+    print(f'  Viability range: [{inst_lincs["cpd_avg_pv"].min():.3f}, '
+          f'{inst_lincs["cpd_avg_pv"].max():.3f}]')
 
     with open(args.processed_data_dir, 'wb') as f:
         pickle.dump({
             'delta_expr': delta_expr,
+            'ctl_expr': ctl_expr,
             'drug_fp': drug_fp,
             'cell_ids': inst_lincs['cell_id'].values,
             'drug_names': inst_lincs['pert_iname'].values,
-            'pert_time': inst_lincs['pert_time'].values,
-            'concentration': inst_lincs['pert_dose'].values,
-            'landmark_gene_ids': landmark_gene_ids,
+            'concentrations': inst_lincs['pert_dose'].values,
+            'durations': inst_lincs['pert_time'].values,
             'cell_line_baselines': cell_line_baselines,
+            'landmark_gene_ids': landmark_gene_ids,
             'viability': inst_lincs['cpd_avg_pv'].values,
         }, f)
     print(f'Saved {n} samples to {args.processed_data_dir}')
 
 
-
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Preprocess CTRPv2 + LINCS for cell viability regression')
+    parser = argparse.ArgumentParser(
+        description='Preprocess CTRPv2 + LINCS for cell viability regression'
+    )
     parser.add_argument('--ctrpv2_zip', type=str, required=True,
                         help='Path to CTRPv2.0_2015_ctd2_ExpandedDataset.zip')
     parser.add_argument('--train_path', type=str, required=True,
-                        help='Path to LINCS Level3 gctx(.gz)')
+                        help='Path to LINCS Level3 gctx (.gz)')
     parser.add_argument('--inst_info', type=str, required=True,
                         help='Path to LINCS inst_info (.gz)')
     parser.add_argument('--drug_info_path', type=str, required=True,
                         help='Path to LINCS pert_info (.gz) for SMILES')
     parser.add_argument('--landmark_genes', type=str, required=True,
                         help='Path to landmark gene info file (.gz)')
-    parser.add_argument('--drug_format', type=str, default='maccs', choices=['maccs', 'morgan'])
+    parser.add_argument('--drug_format', type=str, default='maccs',
+                        choices=['maccs', 'morgan'],
+                        help='Fingerprint type: maccs (166-bit) or morgan (1024-bit)')
     parser.add_argument('--max_log10_conc_delta', type=float, default=0.2,
                         help='Max allowed log10 concentration difference for CTRP-LINCS matching')
     parser.add_argument('--processed_data_dir', type=str, required=True,
                         help='Output .pkl path')
+    parser.add_argument('--conc_min', type=float, default=9.0,
+                        help='Minimum LINCS perturbation dose in uM (default: 9.0)')
+    parser.add_argument('--conc_max', type=float, default=11.0,
+                        help='Maximum LINCS perturbation dose in uM (default: 11.0)')
+    parser.add_argument('--pert_times', type=int, nargs='+', default=[6, 24],
+                        help='Perturbation timepoints to include (default: 6 24). '
+                             'Must match timepoints used in perturbation model training.')
     args = parser.parse_args()
     preprocess_ctrpv2(args)

@@ -114,7 +114,6 @@ def filter_sig_info(sig_info_path, matched_brd_ids):
                     exposure_24h.append(pert_id)
             except (ValueError, KeyError):
                 pass
-
             # 9-11 µM dose
             try:
                 dose = float(fields[col['pert_dose']].strip())
@@ -200,7 +199,7 @@ def preprocess_data(args):
     drug_format = args.drug_format
 
     print('Converting drug SMILES to {} fingerprints...'.format(drug_format))
-    drugs_df = preprocess_drugs(format=drug_format, # change to morgan for morgan fps
+    drugs_df = preprocess_drugs(format=drug_format,
         file_path=ensure_decompressed(args.drug_info_path), # '../../data/perturbation_data/GSE92742_Broad_LINCS_pert_info.txt.gz'
         pert_ids=perts['pert_id'].unique()
     )
@@ -219,7 +218,6 @@ def load_lincs_data(gctx_path, filtered_perts, drugs_df, landmark_genes, args, i
     ctl_ids = filtered_perts['ctl_inst_ids'].tolist()
     ctl_ids_flat = [x for item in ctl_ids for x in (item if isinstance(item, list) else [item])]
     all_inst_ids = list(set(filtered_perts['inst_id'].tolist() + ctl_ids_flat))
-    # Filter landmark gene IDs to those actually present in the gctx file
     row_meta = parse_gctx.get_row_metadata(gctx_path)
     available_rids = set(row_meta.index.astype(str).tolist())
     landmark_genes_col = [g for g in [str(x) for x in landmark_genes_col] if g in available_rids]
@@ -238,10 +236,8 @@ def load_lincs_data(gctx_path, filtered_perts, drugs_df, landmark_genes, args, i
     filtered_perts = filtered_perts.reset_index(drop=True)
     for i, row in filtered_perts.iterrows():
         if args.cell_line_consensus:
-            # use MODZ consensus across all DMSO replicates for this cell line
             control_pairs.append(cell_line_baselines[row['cell_id']].reshape(1, -1))
         else:
-            # use plate-matched DMSO replicates
             ctl = row['ctl_inst_ids']
             control_pairs.append(expression_df[ctl].values.T.astype(np.float32))
         treatment_pair[i, :] = expression_df[row['inst_id']].values

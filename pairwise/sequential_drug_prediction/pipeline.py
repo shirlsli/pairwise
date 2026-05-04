@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from cmapPy.pandasGEXpress import parse_gctx
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models'))
 from xpert_morgan import XPertMorgan, PerturbationDataset, evaluate_model, loss_fn, apply_binning
-from hyperparameter_search import run_hyperparameter_search, seed_study
+from hyperparameter_search import run_hyperparameter_search
 import math
 import json
 from preprocess_drugs import preprocess_drugs
@@ -103,7 +103,6 @@ def train_fold(split, args, device):
         patience_counter = checkpoint['patience_counter']
         print(f"Resumed from epoch {start_epoch}, best val loss: {best_val_loss:.4f}")
     elif args.resume and os.path.exists(model_path):
-        # partial resume — weights only, optimizer/scheduler restart
         print(f"No checkpoint found, resuming from weights only: {model_path}")
         model.load_state_dict(torch.load(model_path, map_location=device))
 
@@ -214,12 +213,6 @@ def seq_pred_pipeline(args):
     device = args.device
     os.makedirs(args.model_output_dir, exist_ok=True)
 
-    if args.seed_optuna:
-        if not args.optuna_storage:
-            raise ValueError("--seed_optuna requires --optuna_storage")
-        seed_study(args.optuna_storage)
-        return []
-
     if not os.path.exists(args.processed_data_dir):
         landmark_gene_ids = preprocess_data(args)
     else:
@@ -244,7 +237,7 @@ def seq_pred_pipeline(args):
         print("Inference complete.")
         return
 
-    if all(os.path.exists(p) for p in fold_paths):
+    if not args.collapse_pkl and all(os.path.exists(p) for p in fold_paths):
         print("Loading existing folds from disk...")
         all_splits = []
         for p in fold_paths:
@@ -252,14 +245,10 @@ def seq_pred_pipeline(args):
                 all_splits.append(pickle.load(f))
         collapsed_path = args.processed_data_dir.replace('.pkl', '_collapsed.pkl')
     else:
-        all_splits, collapsed_path = train_val_test_split(
-            args.processed_data_dir, args, landmark_gene_ids
-        )
+        all_splits, collapsed_path = train_val_test_split(args.processed_data_dir, args, landmark_gene_ids)
         os.makedirs(args.fold_output_dir, exist_ok=True)
         for split in all_splits:
-            fold_path = os.path.join(
-                args.fold_output_dir, f"fold_{split['fold']}.pkl"
-            )
+            fold_path = os.path.join(args.fold_output_dir, f"fold_{split['fold']}.pkl")
             with open(fold_path, 'wb') as f:
                 pickle.dump(split, f)
             print(f"Saved fold {split['fold']} to {fold_path}")
@@ -269,11 +258,11 @@ def seq_pred_pipeline(args):
         with open(args.config_path, 'r') as f:
             base_config = json.load(f)
         best_params = run_hyperparameter_search(
-            all_splits, args.device, n_trials=args.n_trials,
+            all_splits, args.device,
             output_path='optuna_study.pkl', base_config=base_config,
             storage_path=args.optuna_storage,
             n_trials_per_worker=args.n_trials_per_worker,
-            collect_only=args.optuna_collect,
+            collect_only=args.optuna_collect
         )
         if args.search_only:
             print("Search-only mode: exiting without training folds.")
@@ -282,10 +271,8 @@ def seq_pred_pipeline(args):
             print("No completed trials found; cannot train. Exiting.")
             return []
         args.trt_structure = best_params['trt_structure']
-        args.learning_rate = best_params['learning_rate']
         args.mse_weight = best_params['mse_weight']
         args.pcc_weight = best_params['pcc_weight']
-        args.dropout = best_params['dropout']
         print(f"Best params found: {best_params}")
     
     if args.collapse_pkl:
@@ -354,35 +341,14 @@ def inference(combine_path, args):
 
     all_cell_ids = sorted(np.unique(data['cell_ids']))
     cell_id_to_idx = {c: i for i, c in enumerate(all_cell_ids)}
-
-    collapsed_path = args.processed_data_dir.replace('.pkl', '_collapsed.pkl')
-    with open(collapsed_path, 'rb') as f:
+    with open(args.processed_data_dir, 'rb') as f:
         collapsed_data = pickle.load(f)
+    print(collapsed_data.keys())
     bin_edges = collapsed_data['bin_edges']
     cell_line_baselines = collapsed_data.get('cell_line_baselines') or data.get('cell_line_baselines', {})
-    gene_num = next(iter(cell_line_baselines.values())).shape[0]
+    with open(args.config_path, 'r') as f:
+        config = json.load(f)
 
-    config = {
-        'dataset': {
-            'gene_num': gene_num,
-            'n_bins': args.n_bins,
-            'num_cell_id': len(cell_id_to_idx),
-            'num_pert_time': 6,
-        },
-        'model': {
-            'ATTN': {
-                'hidden_size': args.hidden_size,
-                'n_heads': args.num_heads,
-                'attention_probs_dropout_prob': args.dropout,
-                'hidden_dropout_prob': args.dropout,
-                'cell_input_hidden_dropout_prob': args.dropout,
-                'drug_input_hidden_dropout_prob': args.dropout,
-                'ppi_gene_vector_path': args.ppi_gene_vector_path,
-                'ctl_structure': args.ctl_structure,
-                'trt_structure': args.trt_structure,
-            }
-        }
-    }
     models = []
     for fold_idx in range(5):
         model_path = os.path.join(args.inference_path, f"model_fold_{fold_idx}.pt")
@@ -392,62 +358,60 @@ def inference(combine_path, args):
             m.to(args.device)
             m.eval()
             models.append(m)
-    if not models:
-        raise FileNotFoundError(f"No fold models found in {args.inference_path}")
     print(f"Loaded {len(models)} fold models for ensembling")
 
     all_pert_ids = set(combine['compound'].tolist())
     drug_fps_df = preprocess_drugs(format=args.drug_format, file_path=args.drug_info_path, pert_ids=all_pert_ids)
-    fp_lookup = {row['pert_id']: row['fp'] for _, row in drug_fps_df.iterrows()}
+    fp_lookup = {row['pert_iname'].lower(): row['fp'] for _, row in drug_fps_df.iterrows()}
 
+    drug_info = {}
+    for row in combine.itertuples():
+        compound = row.compound
+        if compound not in drug_info:
+            cell_id = row.cell_id
+            time_idx = int(row.time_idx)
+            fp = fp_lookup.get(compound.lower())
+            cell_idx_val = cell_id_to_idx.get(cell_id)
+            baseline = cell_line_baselines.get(cell_id).astype(np.float32)
 
-    feature_vectors = {}
-    for row_a in combine.itertuples():
-        compound_a = row_a.compound
-        cell_id = row_a.cell_id
-        time_idx_a = int(row_a.time_idx)
+            delta = predict_ensemble(fp, baseline, bin_edges, time_idx, cell_idx_val, models, args.device)
+            drug_info[compound] = {
+                'delta': delta,
+                'state_after': baseline + delta,
+                'baseline': baseline,
+                'fp': fp,
+                'cell_idx_val': cell_idx_val,
+                'time_idx': time_idx,
+            }
 
-        fp_a = fp_lookup.get(compound_a)
-        if fp_a is None:
-            print(f"Warning: no fingerprint for {compound_a}, skipping")
-            continue
-        cell_idx_val = cell_id_to_idx.get(cell_id)
-        if cell_idx_val is None:
-            print(f"Warning: cell {cell_id} not in training data, skipping")
-            continue
-        baseline = cell_line_baselines.get(cell_id)
-        if baseline is None:
-            print(f"Warning: no baseline for cell {cell_id}, skipping")
-            continue
-        baseline = baseline.astype(np.float32)
-
-        print(f"Predicting for {compound_a} in cell line {cell_id} at time bin {time_idx_a}...")
-        delta_a = predict_ensemble(fp_a, baseline, bin_edges, time_idx_a, cell_idx_val, models, args.device)
-        state_after_a = baseline + delta_a
-
-        feature_vectors[compound_a] = {}
-        for row_b in combine.itertuples():
-            compound_b = row_b.compound
+    synergy_input = {}
+    for compound_a, info_a in drug_info.items():
+        synergy_input[compound_a] = {}
+        for compound_b, info_b in drug_info.items():
             if compound_b != compound_a:
-                time_idx_b = int(row_b.time_idx)
-                fp_b = fp_lookup.get(compound_b)
-                if fp_b is None:
-                    continue
-                delta_b = predict_ensemble(fp_b, state_after_a, bin_edges, time_idx_b, cell_idx_val, models, args.device)
-                feature_vectors[compound_a][compound_b] = compile_feature_vector(baseline, delta_a, delta_b, fp_a, fp_b)
+                delta_b_given_a = predict_ensemble(
+                    info_b['fp'], info_a['state_after'], bin_edges,
+                    info_b['time_idx'], info_a['cell_idx_val'], models, args.device
+                )
+                s0 = info_a['baseline']
+                s1 = info_a['state_after']
+                s2 = s1 + delta_b_given_a
 
-    feature_vectors_path = os.path.join(args.inference_path, 'feature_vectors.pkl')
-    with open(feature_vectors_path, 'wb') as f:
-        pickle.dump(feature_vectors, f)
-    print(f"Saved feature vectors to {feature_vectors_path}")
-    return feature_vectors
+                synergy_input[compound_a][compound_b] = {
+                    's0': s0,
+                    's1': s1,
+                    's2': s2,
+                    'fp_a': info_a['fp'],
+                    'fp_b': info_b['fp'],
+                    'delta_a': info_a['delta'],
+                    'delta_b_given_a': delta_b_given_a,
+                }
 
-
-def compile_feature_vector(baseline, delta_a, delta_b, fp_a, fp_b):
-    prod = delta_a * delta_b
-    diff = np.abs(delta_a - delta_b)
-    return np.concatenate([baseline, delta_a, delta_b, prod, diff, fp_a, fp_b])
-
+    synergy_input_path = os.path.join(args.inference_path, 'synergy_input.pkl')
+    with open(synergy_input_path, 'wb') as f:
+        pickle.dump(synergy_input, f)
+    print(f"Saved feature vectors to {synergy_input_path}")
+    return synergy_input
 
 TIME_BIN_EDGES = np.array([0, 3, 6, 12, 24, 48, 72])
 
@@ -527,7 +491,15 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--learning_rate', type=float, default=4e-3)
     parser.add_argument('--patience', type=int, default=50, help='Early stopping patience in epochs')
-    parser.add_argument('--warm_start', action='store_true', help='Whether to warm start, default is cold-drug training from scratch')
+    parser.add_argument('--warm_start', action='store_true', help='Use random sample splits instead of drug-based k-fold splits')
+    parser.add_argument('--zero_shot', action='store_true',
+        help='Zero-shot cell-line evaluation: hold out cell lines for test/val; only test samples whose drugs were seen in training')
+    parser.add_argument('--zs_iters', type=int, default=20,
+        help='Number of random iterations for zero-shot cell-line splits')
+    parser.add_argument('--test_frac', type=float, default=0.2,
+        help='Fraction of cell lines held out for test in zero-shot mode')
+    parser.add_argument('--val_frac', type=float, default=0.1,
+        help='Fraction of remaining cell lines held out for val in zero-shot mode')
     parser.add_argument('--fold_idx', type=int, default=None, help='Fold index for parallelization')
     parser.add_argument('--resume', action='store_true', help='Resume training')
 
@@ -548,17 +520,14 @@ if __name__ == "__main__":
 
     # Hyperparameter Search
     parser.add_argument('--hyperparameter_search', action='store_true', help='Run Optuna hyperparameter search before full CV')
-    parser.add_argument('--n_trials', type=int, default=50, help='Number of Optuna trials')
     parser.add_argument('--optuna_storage', type=str, default=None,
         help='Path to Optuna JournalFile for parallel search (enables multi-worker mode)')
     parser.add_argument('--n_trials_per_worker', type=int, default=None,
-        help='Trials this worker runs (parallel mode); omit to run all n_trials serially')
+        help='Trials this worker runs (parallel mode); omit to run all trials serially')
     parser.add_argument('--search_only', action='store_true',
         help='Run hyperparameter search then exit without training folds')
     parser.add_argument('--optuna_collect', action='store_true',
         help='Load best params from --optuna_storage and run training (no new search trials)')
-    parser.add_argument('--seed_optuna', action='store_true',
-        help='Seed --optuna_storage with previously completed trials then exit')
     parser.add_argument('--ppi_gene_vector_path', type=str,
         default='/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/perturbation_data/PPI_gene_vector_128d.npy',
         help='Path to pretrained PPI gene vector embeddings')
@@ -572,7 +541,6 @@ if __name__ == "__main__":
     parser.add_argument('--combine_drug_cell_line_path', type=str, default="/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/targeted_drug_list_with_cell_lines.tsv",
         help='Path to tsv file with columns cell_id, compound, time_idx')
 
-    # First pass: get config_path only, then apply JSON values as defaults
     pre, _ = parser.parse_known_args()
     if pre.config_path:
         with open(pre.config_path) as f:
