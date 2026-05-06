@@ -11,6 +11,7 @@ conda activate sequential_prediction_311
 
 DATA=/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/cell_viability_data/processed_ctrpv2_lincs_delta_expr.pkl
 OUT=/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/cell_viability_regression
+MODEL_PATH=/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_optuna
 
 # python train_ridge_regression.py \
 #   --processed_data_path $DATA \
@@ -48,11 +49,29 @@ OUT=/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/
 #   --test_frac 0.2 \
 #   --zs_iters 20
 
+# python train_ridge_regression.py \
+#   --model_type zero_shot \
+#   --processed_data_path $DATA \
+#   --model_out $OUT/ridge_model_zero_shot_with_fp.pkl \
+#   --result_out $OUT/ridge_pcc_results_zero_shot_with_fp.pkl \
+#   --alpha 1.0 \
+#   --test_frac 0.2 \
+#   --zs_iters 20
+
+# python train_ridge_regression.py \
+#   --model_type ridge_synergy_inference \
+#   --model_path $OUT/ridge_model.pkl \
+#   --processed_data_path /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_optuna/synergy_input.pkl \
+#   --result_out /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_optuna/inference_results.pkl
+
 python train_ridge_regression.py \
-  --model_type zero_shot \
-  --processed_data_path $DATA \
-  --model_out $OUT/ridge_model_zero_shot_with_fp.pkl \
-  --result_out $OUT/ridge_pcc_results_zero_shot_with_fp.pkl \
-  --alpha 1.0 \
-  --test_frac 0.2 \
-  --zs_iters 20
+  --model_type rank_synergy_predictions \
+  --processed_data_path /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_optuna/inference_results.pkl \
+  --result_out /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/ranked_viability.csv
+
+# python train_ridge_regression.py \
+#   --model_type ridge_synergy_inference \
+#   --model_path $OUT/ridge_model.pkl \
+#   --processed_data_path $MODEL_PATH/synergy_input.pkl \
+#   --result_out $MODEL_PATH/inference_results.pkl \
+#   --combine_path /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/targeted_drug_list_with_cell_lines.tsv

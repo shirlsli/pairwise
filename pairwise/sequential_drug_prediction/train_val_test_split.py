@@ -25,12 +25,12 @@ def calculate_cd(control_matrix, treatment_matrix, landmark_gene_ids,
     rep_pvals = []
 
     for i in range(treatment_matrix.shape[0]):
-        treatment_rep = treatment_matrix[i:i+1]  # (1, 978)
+        treatment_rep = treatment_matrix[i:i+1]
 
         # geode expects (n_genes, n_samples)
         mat = np.hstack([
-            control_matrix.T,   # (978, n_controls)
-            treatment_rep.T     # (978, 1)
+            control_matrix.T,
+            treatment_rep.T
         ])
         col_labels = ['1'] * control_matrix.shape[0] + ['2']
 
@@ -76,7 +76,7 @@ def calculate_modz(replicate_matrix):
         return replicate_matrix.mean(axis=0)
 
     corr_matrix = spearmanr(replicate_matrix.T)[0]
-    weights = np.sum(corr_matrix, axis=1) - 1  # exclude self-correlation
+    weights = np.sum(corr_matrix, axis=1) - 1
     weights = np.clip(weights, 0, None)
 
     if weights.sum() == 0:
@@ -89,7 +89,6 @@ def compute_cell_line_baselines(inst_info, expression_df, landmark_genes_col):
     controls = inst_info[inst_info["pert_id"] == "DMSO"]
     cell_line_baselines = {}
     for cell_id, group in controls.groupby("cell_id"):
-        # only use inst_ids that were actually loaded into expression_df
         valid_ids = [i for i in group["inst_id"].tolist() if i in expression_df.columns]
         if not valid_ids:
             continue
@@ -174,7 +173,6 @@ def collapse_replicates(data, args, landmark_gene_ids, calculate_sig=1, nnull=10
         print(f"Filtered by CD significance: {filtered}")
         print(f"CD failed, fell back to MODZ: {failed}")
 
-    # return collapsed data — all arrays now have len(results) rows
     return {
         'delta_expr':   np.vstack([r['delta_expr'] for r in results]),
         'control_pair': np.vstack([r['control_pair'] for r in results]),
@@ -189,13 +187,8 @@ def train_val_test_split(preprocessed_save_path, args, landmark_gene_ids):
         data = pickle.load(f)
 
     normalized_data = collapse_replicates(data, args, landmark_gene_ids)
-
-    # Compute time bin indices from raw durations, then drop raw durations
     normalized_data['time_idx'] = encode_time_bins(normalized_data['durations'])
 
-    # Compute bin edges from a proxy training set (~90% of data).
-    # Using all non-fold-0 drugs as proxy — edges are stable across
-    # folds since MODZ scores have a consistent population distribution.
     drug_names = normalized_data['drug_names']
     unique_drugs = np.unique(drug_names)
     np.random.seed(42)
@@ -223,7 +216,9 @@ def train_val_test_split(preprocessed_save_path, args, landmark_gene_ids):
             'cell_line_baselines': data.get('cell_line_baselines', {}),
         }, f)
 
-    if args.warm_start:
+    if getattr(args, 'zero_shot', False):
+        splits = create_zero_shot_kfold_splits(normalized_data, n_folds=5, random_seed=42)
+    elif args.warm_start:
         splits = create_warm_start_splits(normalized_data, n_folds=5, random_seed=42)
     else:
         splits = create_kfold_splits(normalized_data, args, landmark_gene_ids,
@@ -233,7 +228,6 @@ def train_val_test_split(preprocessed_save_path, args, landmark_gene_ids):
 TIME_BIN_EDGES = np.array([0, 3, 6, 12, 24, 48, 72])
 
 def encode_time_bins(durations, bin_edges=TIME_BIN_EDGES):
-    """Map continuous durations to discrete bin indices."""
     return (np.digitize(durations, bin_edges[1:-1])
               .astype(np.int64))
 
@@ -286,6 +280,116 @@ def create_kfold_splits(collapsed_data, args,
             'test':  make_split(test_idx, collapsed_data)
         })
     return all_splits
+
+def create_zero_shot_kfold_splits(collapsed_data, n_folds=5, random_seed=42):
+    cell_ids = collapsed_data['cell_ids']
+    drug_names = collapsed_data['drug_names']
+    unique_cells = np.unique(cell_ids)
+
+    np.random.seed(random_seed)
+    shuffled_cells = np.random.permutation(unique_cells)
+    folds = [fold.tolist() for fold in np.array_split(shuffled_cells, n_folds)]
+
+    print(f"\nCreated {n_folds} cell-line folds:")
+    for i, fold in enumerate(folds):
+        fold_idx = np.where(np.isin(cell_ids, fold))[0]
+        print(f"  Fold {i}: {len(fold)} cell lines, {len(fold_idx)} samples")
+
+    all_splits = []
+    for test_fold_idx in range(n_folds):
+        test_cells = set(folds[test_fold_idx])
+        val_cells  = set(folds[(test_fold_idx + 1) % n_folds])
+        train_cells = set(c for i, fold in enumerate(folds)
+                          for c in fold
+                          if i != test_fold_idx and i != (test_fold_idx + 1) % n_folds)
+
+        train_mask = np.array([c in train_cells for c in cell_ids])
+        train_drugs = set(drug_names[train_mask])
+
+        val_mask = np.array([
+            c in val_cells and d in train_drugs
+            for c, d in zip(cell_ids, drug_names)
+        ])
+        test_mask = np.array([
+            c in test_cells and d in train_drugs
+            for c, d in zip(cell_ids, drug_names)
+        ])
+
+        train_idx = np.where(train_mask)[0]
+        val_idx   = np.where(val_mask)[0]
+        test_idx  = np.where(test_mask)[0]
+
+        n_val_total  = int(np.sum(np.isin(cell_ids, list(val_cells))))
+        n_test_total = int(np.sum(np.isin(cell_ids, list(test_cells))))
+        print(f"\nFold {test_fold_idx} as test:")
+        print(f"  Cell lines — train: {len(train_cells)}, val: {len(val_cells)}, test: {len(test_cells)}")
+        print(f"  Drugs seen in training: {len(train_drugs)}")
+        print(f"  Train: {len(train_idx)} samples")
+        print(f"  Val:   {len(val_idx)} / {n_val_total} val-cell samples (drug-seen filter)")
+        print(f"  Test:  {len(test_idx)} / {n_test_total} test-cell samples (drug-seen filter)")
+
+        all_splits.append({
+            'fold':  test_fold_idx,
+            'train': make_split(train_idx, collapsed_data),
+            'val':   make_split(val_idx,   collapsed_data),
+            'test':  make_split(test_idx,  collapsed_data),
+        })
+
+    return all_splits
+
+
+def create_zero_shot_cell_line_splits(collapsed_data, n_iters=20, test_frac=0.2,
+                                      val_frac=0.1, random_seed=42):
+    cell_ids = collapsed_data['cell_ids']
+    drug_names = collapsed_data['drug_names']
+    unique_cells = np.unique(cell_ids)
+
+    np.random.seed(random_seed)
+    all_splits = []
+
+    for i in range(n_iters):
+        n_test_cells = max(1, int(len(unique_cells) * test_frac))
+        test_cells = set(np.random.choice(unique_cells, size=n_test_cells, replace=False))
+        remaining_cells = [c for c in unique_cells if c not in test_cells]
+
+        n_val_cells = max(1, int(len(remaining_cells) * val_frac))
+        val_cells = set(np.random.choice(remaining_cells, size=n_val_cells, replace=False))
+        train_cells = set(remaining_cells) - val_cells
+
+        train_mask = np.array([c in train_cells for c in cell_ids])
+        train_drugs = set(drug_names[train_mask])
+
+        val_mask = np.array([
+            c in val_cells and d in train_drugs
+            for c, d in zip(cell_ids, drug_names)
+        ])
+        test_mask = np.array([
+            c in test_cells and d in train_drugs
+            for c, d in zip(cell_ids, drug_names)
+        ])
+
+        train_idx = np.where(train_mask)[0]
+        val_idx   = np.where(val_mask)[0]
+        test_idx  = np.where(test_mask)[0]
+
+        n_val_total  = int(np.sum(np.isin(cell_ids, list(val_cells))))
+        n_test_total = int(np.sum(np.isin(cell_ids, list(test_cells))))
+        print(f"\nZero-shot iter {i}:")
+        print(f"  Cell lines — train: {len(train_cells)}, val: {len(val_cells)}, test: {len(test_cells)}")
+        print(f"  Drugs seen in training: {len(train_drugs)}")
+        print(f"  Train: {len(train_idx)} samples")
+        print(f"  Val:   {len(val_idx)} / {n_val_total} val-cell samples (drug-seen filter)")
+        print(f"  Test:  {len(test_idx)} / {n_test_total} test-cell samples (drug-seen filter)")
+
+        all_splits.append({
+            'fold':  i,
+            'train': make_split(train_idx, collapsed_data),
+            'val':   make_split(val_idx,   collapsed_data),
+            'test':  make_split(test_idx,  collapsed_data),
+        })
+
+    return all_splits
+
 
 def create_warm_start_splits(collapsed_data, n_folds=5, random_seed=42):
     n_samples = len(collapsed_data['delta_expr'])

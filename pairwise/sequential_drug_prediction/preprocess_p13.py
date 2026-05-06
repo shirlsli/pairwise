@@ -31,7 +31,7 @@ def save_cell_line_lists(p13_cell_lines, lincs_cell_ids, output_dir):
     print(f"Saved {len(p13_cell_lines)} p13 cell lines to {p13_path}")
     print(f"Saved {len(lincs_cell_ids)} LINCS cell lines to {lincs_path}")
 
-def preprocess_p13(input_path, output_path, lincs_pkl_path):
+def preprocess_p13(input_path, output_path, lincs_pkl_path, targeted_drugs_path):
     with open(lincs_pkl_path, 'rb') as f:
         lincs_data = pickle.load(f)
     print(f"lincs_data keys: {lincs_data.keys()}")
@@ -63,7 +63,12 @@ def preprocess_p13(input_path, output_path, lincs_pkl_path):
     print(f"Sample LINCS drug names: {list(smiles_lookup.keys())[:5]}")
     p13_df = add_smiles_columns(p13_df, smiles_lookup)
     p13_df.to_csv(output_path, index=False)
-    return p13_df
+    print(f"Saved to {output_path}")
+    training_samples = subset_training(p13_df, targeted_drugs_path)
+    training_output_path = output_path.replace('.csv', '_training.csv')
+    training_samples.to_csv(training_output_path, index=False)
+    print(f"Saved training samples to {training_output_path}")
+    return p13_df, training_samples
 
 def add_smiles_columns(p13_df, smiles_lookup):
     p13_df['smiles1'] = p13_df['drug_name_x'].str.lower().map(smiles_lookup)
@@ -75,8 +80,22 @@ def add_smiles_columns(p13_df, smiles_lookup):
     print(f"Final dataset size: {after}")
     return p13_df
 
+def subset_training(p13_df, targeted_drugs_path):
+    targeted = pd.read_csv(targeted_drugs_path, sep='\t', header=None, names=['cell_line', 'drug_name', 'count'])
+    targeted_drugs = set(targeted['drug_name'].str.lower())
+
+    drug_x = p13_df['drug_name_x'].str.lower()
+    drug_y = p13_df['drug_name_y'].str.lower()
+
+    targeted_mask = drug_x.isin(targeted_drugs) | drug_y.isin(targeted_drugs)
+
+    training_samples = p13_df[~targeted_mask].copy()
+    print(f"subset_training: {len(training_samples)} / {len(p13_df)} rows kept (removed {targeted_mask.sum()} targeted rows)")
+    return training_samples
+
 if __name__ == "__main__":
     input_path = '/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/synergy_data/p13/p13_trueset.csv'
     output_path = '/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/synergy_data/p13/p13_preprocessed.csv'
     processed_data_path = '/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/perturbation_data/processed_lincs_6_24_hrs_9-11_uM_cell_baseline_consensus.pkl'
+    targeted_drugs_path = '/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/data/targeted_drug_list.txt'
     preprocess_p13(input_path, output_path, processed_data_path)
