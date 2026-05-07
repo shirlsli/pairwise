@@ -405,6 +405,8 @@ def inference(combine_path, args):
                     'fp_b': info_b['fp'],
                     'delta_a': info_a['delta'],
                     'delta_b_given_a': delta_b_given_a,
+                    'time_idx_a': info_a['time_idx'],
+                    'time_idx_b': info_b['time_idx'],
                 }
 
     synergy_input_path = os.path.join(args.inference_path, 'synergy_input.pkl')

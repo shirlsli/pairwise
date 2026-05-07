@@ -579,6 +579,18 @@ def run_ridge_gene_only_inference(args):
     print(f'Saved inference results to {result_out}')
 
 
+def _build_concentration_lookup(lincs_data_path):
+    """Return dict mapping drug_name.lower() -> mean concentration from processed LINCS data."""
+    from collections import defaultdict
+    with open(lincs_data_path, 'rb') as f:
+        data = pickle.load(f)
+    sums, counts = defaultdict(float), defaultdict(int)
+    for name, conc in zip(data['drug_names'], data['concentrations']):
+        sums[name.lower()] += conc
+        counts[name.lower()] += 1
+    return {k: sums[k] / counts[k] for k in sums}
+
+
 def run_ridge_inference_from_synergy(args):
     print(f'Loading model bundle from {args.model_path}...')
     with open(args.model_path, 'rb') as f:
@@ -593,14 +605,21 @@ def run_ridge_inference_from_synergy(args):
     TIME_BIN_EDGES = [0, 3, 6, 12, 24, 48, 72]
 
     single_drug_time_idx = {}
+    single_drug_cell_id  = {}
     if args.combine_path:
         import csv as _csv
         with open(args.combine_path, newline='') as f:
             for row in _csv.reader(f, delimiter='\t'):
                 if len(row) >= 3:
+                    cell_id  = row[0].strip()
                     compound = row[1].strip()
-                    tidx = int(row[2].strip())
+                    tidx     = int(row[2].strip())
                     single_drug_time_idx[compound] = TIME_BIN_EDGES[tidx]
+                    single_drug_cell_id[compound]  = cell_id
+
+    conc_lookup = {}
+    if args.lincs_data_path:
+        conc_lookup = _build_concentration_lookup(args.lincs_data_path)
 
     single_drug_delta = {}
     single_drug_fp = {}
@@ -617,6 +636,8 @@ def run_ridge_inference_from_synergy(args):
     a_deltas, a_fps = [], []
     b_deltas, b_fps = [], []
     time_idx_a_list, time_idx_b_list = [], []
+    cell_id_a_list,  cell_id_b_list  = [], []
+    conc_a_list,     conc_b_list     = [], []
     for compound_a, targets in synergy_input.items():
         for compound_b, entry in targets.items():
             pair_labels.append((compound_a, compound_b))
@@ -628,6 +649,10 @@ def run_ridge_inference_from_synergy(args):
             b_fps.append(single_drug_fp[compound_b])
             time_idx_a_list.append(single_drug_time_idx[compound_a])
             time_idx_b_list.append(single_drug_time_idx[compound_b])
+            cell_id_a_list.append(single_drug_cell_id.get(compound_a))
+            cell_id_b_list.append(single_drug_cell_id.get(compound_b))
+            conc_a_list.append(conc_lookup.get(compound_a.lower()))
+            conc_b_list.append(conc_lookup.get(compound_b.lower()))
 
     def _predict(deltas, fps):
         X = np.concatenate([np.stack(deltas).astype(np.float32),
@@ -655,6 +680,10 @@ def run_ridge_inference_from_synergy(args):
         'synergy': synergy,
         'time_idx_a': time_idx_a_list,
         'time_idx_b': time_idx_b_list,
+        'cell_id_a':  cell_id_a_list,
+        'cell_id_b':  cell_id_b_list,
+        'conc_a':     conc_a_list,
+        'conc_b':     conc_b_list,
     }
     result_out = Path(args.result_out)
     result_out.parent.mkdir(parents=True, exist_ok=True)
@@ -758,14 +787,21 @@ def run_xgboost_inference_from_synergy(args):
     TIME_BIN_EDGES = [0, 3, 6, 12, 24, 48, 72]
 
     single_drug_time_idx = {}
+    single_drug_cell_id  = {}
     if args.combine_path:
         import csv as _csv
         with open(args.combine_path, newline='') as f:
             for row in _csv.reader(f, delimiter='\t'):
                 if len(row) >= 3:
+                    cell_id  = row[0].strip()
                     compound = row[1].strip()
-                    tidx = int(row[2].strip())
+                    tidx     = int(row[2].strip())
                     single_drug_time_idx[compound] = TIME_BIN_EDGES[tidx]
+                    single_drug_cell_id[compound]  = cell_id
+
+    conc_lookup = {}
+    if args.lincs_data_path:
+        conc_lookup = _build_concentration_lookup(args.lincs_data_path)
 
     single_drug_delta = {}
     single_drug_fp = {}
@@ -782,6 +818,8 @@ def run_xgboost_inference_from_synergy(args):
     a_deltas, a_fps = [], []
     b_deltas, b_fps = [], []
     time_idx_a_list, time_idx_b_list = [], []
+    cell_id_a_list,  cell_id_b_list  = [], []
+    conc_a_list,     conc_b_list     = [], []
     for compound_a, targets in synergy_input.items():
         for compound_b, entry in targets.items():
             pair_labels.append((compound_a, compound_b))
@@ -793,6 +831,10 @@ def run_xgboost_inference_from_synergy(args):
             b_fps.append(single_drug_fp[compound_b])
             time_idx_a_list.append(single_drug_time_idx[compound_a])
             time_idx_b_list.append(single_drug_time_idx[compound_b])
+            cell_id_a_list.append(single_drug_cell_id.get(compound_a))
+            cell_id_b_list.append(single_drug_cell_id.get(compound_b))
+            conc_a_list.append(conc_lookup.get(compound_a.lower()))
+            conc_b_list.append(conc_lookup.get(compound_b.lower()))
 
     def _predict(deltas, fps):
         X = np.concatenate([np.stack(deltas).astype(np.float32),
@@ -820,6 +862,10 @@ def run_xgboost_inference_from_synergy(args):
         'synergy': synergy,
         'time_idx_a': time_idx_a_list,
         'time_idx_b': time_idx_b_list,
+        'cell_id_a':  cell_id_a_list,
+        'cell_id_b':  cell_id_b_list,
+        'conc_a':     conc_a_list,
+        'conc_b':     conc_b_list,
     }
     result_out = Path(args.result_out)
     result_out.parent.mkdir(parents=True, exist_ok=True)
@@ -842,14 +888,21 @@ def run_xgboost_gene_only_inference_from_synergy(args):
     TIME_BIN_EDGES = [0, 3, 6, 12, 24, 48, 72]
 
     single_drug_time_idx = {}
+    single_drug_cell_id  = {}
     if args.combine_path:
         import csv as _csv
         with open(args.combine_path, newline='') as f:
             for row in _csv.reader(f, delimiter='\t'):
                 if len(row) >= 3:
+                    cell_id  = row[0].strip()
                     compound = row[1].strip()
-                    tidx = int(row[2].strip())
+                    tidx     = int(row[2].strip())
                     single_drug_time_idx[compound] = TIME_BIN_EDGES[tidx]
+                    single_drug_cell_id[compound]  = cell_id
+
+    conc_lookup = {}
+    if args.lincs_data_path:
+        conc_lookup = _build_concentration_lookup(args.lincs_data_path)
 
     single_drug_delta = {}
     for compound_a, targets in synergy_input.items():
@@ -863,6 +916,8 @@ def run_xgboost_gene_only_inference_from_synergy(args):
     combo_deltas = []
     a_deltas, b_deltas = [], []
     time_idx_a_list, time_idx_b_list = [], []
+    cell_id_a_list,  cell_id_b_list  = [], []
+    conc_a_list,     conc_b_list     = [], []
     for compound_a, targets in synergy_input.items():
         for compound_b, entry in targets.items():
             pair_labels.append((compound_a, compound_b))
@@ -871,6 +926,10 @@ def run_xgboost_gene_only_inference_from_synergy(args):
             b_deltas.append(single_drug_delta[compound_b])
             time_idx_a_list.append(single_drug_time_idx[compound_a])
             time_idx_b_list.append(single_drug_time_idx[compound_b])
+            cell_id_a_list.append(single_drug_cell_id.get(compound_a))
+            cell_id_b_list.append(single_drug_cell_id.get(compound_b))
+            conc_a_list.append(conc_lookup.get(compound_a.lower()))
+            conc_b_list.append(conc_lookup.get(compound_b.lower()))
 
     def _predict(deltas, durations):
         dur_col = np.array(durations, dtype=np.float32).reshape(-1, 1)
@@ -898,6 +957,10 @@ def run_xgboost_gene_only_inference_from_synergy(args):
         'synergy': synergy,
         'time_idx_a': time_idx_a_list,
         'time_idx_b': time_idx_b_list,
+        'cell_id_a':  cell_id_a_list,
+        'cell_id_b':  cell_id_b_list,
+        'conc_a':     conc_a_list,
+        'conc_b':     conc_b_list,
     }
     result_out = Path(args.result_out)
     result_out.parent.mkdir(parents=True, exist_ok=True)
@@ -919,6 +982,10 @@ def rank_synergy_predictions(args):
     synergy     = results['synergy']
     time_idx_a  = results.get('time_idx_a', [None] * len(compound_a))
     time_idx_b  = results.get('time_idx_b', [None] * len(compound_b))
+    cell_id_a   = results.get('cell_id_a',  [None] * len(compound_a))
+    cell_id_b   = results.get('cell_id_b',  [None] * len(compound_b))
+    conc_a      = results.get('conc_a',     [None] * len(compound_a))
+    conc_b      = results.get('conc_b',     [None] * len(compound_b))
 
     all_v_alone = np.concatenate([v_a_alone, v_b_alone])
     threshold = np.median(all_v_alone)
@@ -926,7 +993,8 @@ def rank_synergy_predictions(args):
 
     combo_effective = v_combo < threshold
     drugA_active = v_a_alone < threshold
-    valid = combo_effective & drugA_active
+    combo_beats_both = (v_combo < v_a_alone) & (v_combo < v_b_alone)
+    valid = combo_effective & drugA_active & combo_beats_both
 
     print(f'Before filter: {len(compound_a)} pairs')
     print(f'After filter:  {valid.sum()} pairs')
@@ -934,22 +1002,34 @@ def rank_synergy_predictions(args):
     order = np.argsort(synergy[valid])
     valid_indices = np.where(valid)[0][order]
 
-    print(f'\n{"Rank":>5}  {"Compound A":<25}  {"t_A":>5}  {"Compound B":<25}  {"t_B":>5}  '
+    print(f'\n{"Rank":>5}  {"Compound A":<25}  {"cell_A":<8}  {"conc_A":>7}  {"t_A":>5}  '
+          f'{"Compound B":<25}  {"cell_B":<8}  {"conc_B":>7}  {"t_B":>5}  '
           f'{"v_combo":>9}  {"v_A_alone":>9}  {"v_B_alone":>9}  {"synergy":>9}')
-    print('-' * 112)
+    print('-' * 150)
     for rank, idx in enumerate(valid_indices, 1):
-        print(f'{rank:>5}  {compound_a[idx]:<25}  {str(time_idx_a[idx]):>5}  '
-              f'{compound_b[idx]:<25}  {str(time_idx_b[idx]):>5}  '
+        ca = str(cell_id_a[idx]) if cell_id_a[idx] is not None else 'N/A'
+        cb = str(cell_id_b[idx]) if cell_id_b[idx] is not None else 'N/A'
+        ca_conc = f'{conc_a[idx]:.2f}' if conc_a[idx] is not None else 'N/A'
+        cb_conc = f'{conc_b[idx]:.2f}' if conc_b[idx] is not None else 'N/A'
+        print(f'{rank:>5}  {compound_a[idx]:<25}  {ca:<8}  {ca_conc:>7}  {str(time_idx_a[idx]):>5}  '
+              f'{compound_b[idx]:<25}  {cb:<8}  {cb_conc:>7}  {str(time_idx_b[idx]):>5}  '
               f'{v_combo[idx]:>9.4f}  {v_a_alone[idx]:>9.4f}  {v_b_alone[idx]:>9.4f}  {synergy[idx]:>9.4f}')
 
     result_out = Path(args.result_out)
     result_out.parent.mkdir(parents=True, exist_ok=True)
     with open(result_out, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['rank', 'compound_a', 'time_idx_a', 'compound_b', 'time_idx_b',
+        writer.writerow(['rank', 'compound_a', 'cell_id_a', 'conc_a', 'time_idx_a',
+                         'compound_b', 'cell_id_b', 'conc_b', 'time_idx_b',
                          'v_combo', 'v_a_alone', 'v_b_alone', 'synergy'])
         for rank, idx in enumerate(valid_indices, 1):
-            writer.writerow([rank, compound_a[idx], time_idx_a[idx], compound_b[idx], time_idx_b[idx],
+            writer.writerow([rank,
+                             compound_a[idx], cell_id_a[idx],
+                             f'{conc_a[idx]:.4f}' if conc_a[idx] is not None else None,
+                             time_idx_a[idx],
+                             compound_b[idx], cell_id_b[idx],
+                             f'{conc_b[idx]:.4f}' if conc_b[idx] is not None else None,
+                             time_idx_b[idx],
                              float(v_combo[idx]), float(v_a_alone[idx]),
                              float(v_b_alone[idx]), float(synergy[idx])])
     print(f'\nSaved ranked results to {result_out}')
@@ -1312,6 +1392,8 @@ if __name__ == '__main__':
                         help='Path to saved model bundle (.pkl) for inference')
     parser.add_argument('--combine_path', type=str, default=None,
                         help='Path to TSV (cell_id, compound, time_idx) for duration lookup during inference')
+    parser.add_argument('--lincs_data_path', type=str, default=None,
+                        help='Path to processed LINCS pkl for concentration lookup during inference')
     parser.add_argument('--alpha', type=float, default=1.0,
                         help='Ridge regularization strength (default: 1.0).')
     parser.add_argument('--n_estimators', type=int, default=500,

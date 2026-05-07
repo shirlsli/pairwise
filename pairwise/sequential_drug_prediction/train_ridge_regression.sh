@@ -67,7 +67,8 @@ MODEL_PATH=/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pa
 python train_ridge_regression.py \
   --model_type rank_synergy_predictions \
   --processed_data_path /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_optuna/inference_results.pkl \
-  --result_out /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/ranked_viability.csv
+  --result_out /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/ranked_viability.csv \
+  --lincs_data_path $DATA
 
 # python train_ridge_regression.py \
 #   --model_type ridge_synergy_inference \

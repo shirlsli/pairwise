@@ -33,6 +33,7 @@ COMBINE_PATH=/athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/
 #   --model_path $OUT/xgboost_model.pkl \
 #   --processed_data_path $SYNERGY_INPUT \
 #   --combine_path $COMBINE_PATH \
+#   --lincs_data_path $DATA \
 #   --result_out $OUT/xgboost_synergy_inference_results.pkl
 
 # python -u train_ridge_regression.py \
@@ -45,6 +46,7 @@ python -u train_ridge_regression.py \
   --model_path $OUT/xgboost_model_gene_only.pkl \
   --processed_data_path $SYNERGY_INPUT \
   --combine_path $COMBINE_PATH \
+  --lincs_data_path $DATA \
   --result_out $OUT/xgboost_gene_only_synergy_inference_results.pkl
 
 python -u train_ridge_regression.py \
