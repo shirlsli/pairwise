@@ -42,9 +42,10 @@ Unique cell lines:
 - Create time bin indices for dose durations (same bins used in XPert)
     - Including concentration unecessary for this particular preprocessing since 9-11 µM would fall into the same bin, leading to the concentration input to be constant
 - Create quantile-based edges for expression profiles (applying global bin edges similar to XPert but instead of using uniform edges, quantile edges are used since MODZ scores are not necessarily uniformly distributed)
-- Drugs randomly shuffled and divided into 10 folds for k-fold splitting
-    - For each test fold, remaining 9 folds form train and validation pool, from which 1/10 of compounds are used for validation
-    - Splits are compound-stratified (drug only appears once in either train, val, or test)
+    - Bin edges are computed from a proxy training set defined by holding out 1 of 10 random drug splits (~90% of data), ensuring edges are not influenced by the held-out fold
+- Samples randomly shuffled and divided into 5 folds for k-fold cross-validation (warm start)
+    - For each test fold, remaining 4 folds form train and validation pool, from which 1/5 of samples are used for validation
+    - Splits are sample-level (same drug can appear in train, val, and test)
     - Split = (Morgan drug fingerprint, cell line baseline (raw), cell line baseline (binned), MODZ delta expression (target), time bin idx, cell ids, and drug names)
 
 ### Model Input
@@ -54,9 +55,27 @@ Input = (
     Morgan drug fingerprint,  # (1024,) float32
     cell line baseline binned, # (978,)  int64
     time bin idx,              # scalar  int64
+    cell line idx,             # scalar  int64  (auxiliary classification target, not a learned embedding)
     delta expression target    # (978,)  float32
 )
 ```
+
+## Pre-processing CTRPv2 for Cell Viability Regression
+
+CTRPv2 (Cancer Therapeutics Response Portal v2) provides cell viability measurements for perturbed cancer cell lines. This dataset contains the label for the cell viability regression model and needs to be matched with a corresponding change in gene expressions sample from the LINCS L1000 dataset that is of the same duration and approximate concentration.
+
+### Overall Preprocessing Steps for Cell Viability Regression (separated into `preprocess_ctrpv2.py`):
+- Load CTRPv2 tables from zip archive and join metadata to get `(ccl_name, broad_cpd_id, cpd_conc_umol, cpd_avg_pv)`
+    - Average replicate viability measurements by `(ccl_name, broad_cpd_id, cpd_conc_umol)` and convert concentration to log₁₀ scale
+- Filter LINCS instances to those whose cell lines and compounds are present in CTRPv2, excluding DMSO controls
+- Apply the same concentration (9–11 µM) and timepoint (6, 24 hrs) filters as the perturbation model
+- Match each LINCS instance to the nearest CTRPv2 concentration entry by minimising |log₁₀(LINCS dose) − log₁₀(CTRP dose)|
+    - Matches with log₁₀ distance > 0.1 are discarded
+- Extract expression profiles for the 978 landmark genes from LINCS Level 3 gctx for treatment instances and all DMSO controls
+- Apply MODZ to cell line baselines (DMSO replicates) across entire dataset to collapse into single consensus profile (same as perturbation model)
+- Compute delta expression: `delta_expr = treatment_profile − cell_line_baseline`
+    - Each matched LINCS instance is kept individually
+- Compute drug fingerprints (Morgan 1024-bit) from LINCS pert info SMILES
 
 ## Transformer Encoder-Decoder with Cross-Attention
 
@@ -64,9 +83,9 @@ Guo et. al uses a transformer based implementation called XPert for predicting g
 
 This led me to consider incorporating a simplified version of the dual-branch transformer design from XPert. XPert has two outputs: perturbed profile and gene expression changes. Since I'm only interested in gene expression changes, I will only have 1 output head (vs. the 3 in XPert) and am using the same gene expression delta loss function as XPert. According to Guo et. al, "the loss for this task is a combination of m.s.e. and PCC losses. By incorporating the PCC loss, the model is encouraged to not only minimize the absolute differences between predictions and ground truth but also to capture the underlying correlation structure, leading to more accurate and biologically meaningful predictions".
 
-`Ldeg = β * MSE(xdeg, x̂deg) + γ * (1 - PCC(xdeg, x̂deg))`
+`L = β * MSE(xdeg, x̂deg) + γ * (1 - PCC(xdeg, x̂deg)) + 0.003 * CE(cell_id)`
 
-**β and γ are weighting coefficients**
+**β and γ are tunable weighting coefficients (searched via Optuna; best found: β=0.1, γ=1.0). The auxiliary cross-entropy term predicts cell line identity from the CLS token of both encoder branches and is fixed at 0.003.**
 
 XPert credits the pretrained heterogenous graph biological embedding (includes information about drug-target interactions, protein-protein interactions, and drug-drug structural similarity) for its cold-start performance, so I decided to incorporate that as well. I submitted an Academic Downloads license application to DrugBank and am currently waiting on their response. For now, I will not include this, but I plan on retraining once I receive access. XPert also uses UniMol to represent compounds, but I chose Morgan fingerprints for simplicity's sake.
 
@@ -126,17 +145,47 @@ An Optuna study (TPE sampler, seed 42; MedianPruner with 5 warmup steps) was sub
 | `pcc_weight` | {0.5, 1.0, 2.0} |
 | `dropout` | Uniform in [0.0, 0.1] |
 
-The search was configured for 20 trials, each trained for up to 100 epochs with patience 10 on fold 0's validation set and evaluated by mean PCC. Only 2 of the 20 planned trials have been completed so far:
+The search was configured for 20 trials, each trained for up to 100 epochs with patience 10 on fold 0's validation set and evaluated by mean PCC. The initial search was done sequentially and timed out due to Cayuga's time limit. The results are from the sequential search.
 
 | Trial | `learning_rate` | `trt_structure` | `mse_weight` | `pcc_weight` | `dropout` | Val PCC |
 |---|---|---|---|---|---|---|
 | 0 | 6.40×10⁻³ | `CA+SA+SA+CA` | 0.1 | 1.0 | 0.071 | 0.6597 |
 | 1 | 5.64×10⁻³ | `CA+SA+SA+CA` | 0.1 | 1.0 | 0.029 | 0.6889 |
 
+![Seeded trials plots](../pairwise/sequential_drug_prediction/slurm-2788447_trial_comparison.png)
+
 Trial 1 was the best found, suggesting that lower dropout (0.029 vs. 0.071) and a slightly lower peak learning rate improve validation PCC. Both trials preferred `mse_weight=0.1` over the manually chosen 0.2, and both retained the default `CA+SA+SA+CA` perturbation encoder structure. The search did not complete enough trials to draw firm conclusions about `pcc_weight` or `trt_structure`, so the base configuration was used for the full 5-fold evaluation.
 
 A pattern observed from the trials conducted so far include:
 - Dropout matters more than expected, less dropout seems to result in better performance
+- Log(2) learning rate is marginally better than double learning rate
+
+I made a mistake when implementing the parallel search: I used the above trials as seeds and Optuna did not diversify the trial parameters. As such, I swapped to using 
+
+![Optuna parallel trials results](../pairwise/sequential_drug_prediction/optuna_journal_optuna_summary.png)
+
+##### Best Optuna Configuration (`config_optuna_best.json`)
+
+| Category | Parameter | Value |
+|---|---|---|
+| Dataset | `gene_num` | 978 |
+| Dataset | `n_bins` | 128 |
+| Dataset | `num_cell_id` | 70 |
+| Dataset | `num_pert_time` | 6 |
+| Model | `hidden_size` | 256 |
+| Model | `n_heads` | 8 |
+| Model | `attention_probs_dropout_prob` | 0.0708 |
+| Model | `hidden_dropout_prob` | 0.0708 |
+| Model | `cell_input_hidden_dropout_prob` | 0.0708 |
+| Model | `drug_input_hidden_dropout_prob` | 0.0708 |
+| Model | `ctl_structure` | `SA+SA+SA+SA` |
+| Model | `trt_structure` | `CA+SA+SA+CA` |
+| Training | `learning_rate` | 6.40×10⁻³ |
+| Training | `mse_weight` (β) | 0.1 |
+| Training | `pcc_weight` (γ) | 1.0 |
+| Training | `epochs` | 200 |
+| Training | `batch_size` | 256 |
+| Training | `patience` | 20 |
 
 ### Results For Base Config
 
@@ -191,6 +240,83 @@ Mean Pos P@20: 0.4398 ± 0.0055
 Median Pos P@20: 0.4382
 Mean Neg P@20: 0.3793 ± 0.0051
 Median Neg P@20: 0.3771
+
+### Results For Warm Start
+
+| Fold | PCC (mean ± std) | Spearman (mean ± std) | R² (mean ± std) | RMSE | Prec@20 Up | Prec@20 Down |
+|---|---|---|---|---|---|---|
+| 0 | 0.7038 ± 0.1929 | 0.6917 ± 0.1933 | 0.4652 ± 0.3253 | 0.5341 | 0.4441 ± 0.1868 | 0.3804 ± 0.1721 |
+| 1 | 0.6985 ± 0.1935 | 0.6862 ± 0.1935 | 0.4535 ± 0.3305 | 0.5380 | 0.4377 ± 0.1848 | 0.3762 ± 0.1699 |
+| 2 | 0.6871 ± 0.1970 | 0.6736 ± 0.1974 | 0.4200 ± 0.3803 | 0.5465 | 0.4280 ± 0.1853 | 0.3646 ± 0.1702 |
+| 3 | 0.7140 ± 0.1884 | 0.7020 ± 0.1882 | 0.4823 ± 0.3214 | 0.5243 | 0.4555 ± 0.1864 | 0.3932 ± 0.1737 |
+| 4 | 0.7108 ± 0.1884 | 0.6990 ± 0.1885 | 0.4773 ± 0.3161 | 0.5257 | 0.4489 ± 0.1857 | 0.3904 ± 0.1729 |
+| **Mean** | **0.7028 ± 0.0095** | **0.6905 ± 0.0101** | **0.4597 ± 0.0222** | **0.5337 ± 0.0082** | **0.4428 ± 0.0094** | **0.3810 ± 0.0103** |
+
+Cross-validation results (5 folds):
+Mean PCC: 0.7028 ± 0.0095
+Median PCC: 0.7038
+Mean Spearman: 0.6905 ± 0.0101
+Median Spearman: 0.6917
+Mean R²: 0.4597 ± 0.0222
+Median R²: 0.4652
+Mean RMSE: 0.5337 ± 0.0082
+Median RMSE: 0.5341
+Mean Pos P@20: 0.4428 ± 0.0094
+Median Pos P@20: 0.4441
+Mean Neg P@20: 0.3810 ± 0.0103
+Median Neg P@20: 0.3804
+
+### Results For Zero-Shot Cell-Line Generalization
+
+| Fold | PCC (mean ± std) | Spearman (mean ± std) | R² (mean ± std) | RMSE | Prec@20 Up | Prec@20 Down |
+|---|---|---|---|---|---|---|
+| 0 | 0.0840 ± 0.1829 | 0.0711 ± 0.1732 | -0.1977 ± 0.2480 | 0.7556 | 0.1015 ± 0.0929 | 0.0615 ± 0.0651 |
+| 1 | 0.1196 ± 0.2180 | 0.1138 ± 0.2125 | -0.3930 ± 0.5588 | 0.7688 | 0.0955 ± 0.1008 | 0.0753 ± 0.0860 |
+| 2 | 0.1187 ± 0.1693 | 0.1110 ± 0.1696 | -0.1378 ± 0.1930 | 0.7507 | 0.0854 ± 0.0694 | 0.0699 ± 0.0582 |
+| 3 | 0.1746 ± 0.2998 | 0.1678 ± 0.2960 | -0.0915 ± 0.2603 | 0.8183 | 0.1254 ± 0.1211 | 0.0534 ± 0.0745 |
+| 4 | 0.0729 ± 0.1363 | 0.0625 ± 0.1412 | -0.2289 ± 0.3110 | 0.8495 | 0.0627 ± 0.0645 | 0.0370 ± 0.0433 |
+| **Mean** | **0.1140 ± 0.0356** | **0.1052 ± 0.0375** | **-0.2098 ± 0.1032** | **0.7886 ± 0.0387** | **0.0941 ± 0.0205** | **0.0594 ± 0.0135** |
+
+Cross-validation results (5 folds):
+Mean PCC: 0.1140 ± 0.0356
+Median PCC: 0.1187
+Mean Spearman: 0.1052 ± 0.0375
+Median Spearman: 0.1110
+Mean R²: -0.2098 ± 0.1032
+Median R²: -0.1977
+Mean RMSE: 0.7886 ± 0.0387
+Median RMSE: 0.7688
+Mean Pos P@20: 0.0941 ± 0.0205
+Median Pos P@20: 0.0955
+Mean Neg P@20: 0.0594 ± 0.0135
+Median Neg P@20: 0.0615
+
+## Cell Viability Regression Models
+
+Two model families were trained to predict cell viability from delta expression profiles: Ridge regression and XGBoost. Both use the same feature matrix (delta expression concatenated with drug fingerprints, or delta expression + duration for gene-only variants).
+
+### Hyperparameters
+
+| Model | Hyperparameters |
+|---|---|
+| Ridge | `alpha=1.0` |
+| XGBoost (grid search) | `n_estimators` ∈ {100, 200, 300}, `max_depth` ∈ {4, 6, 8}, `learning_rate` ∈ {0.1, 0.3, 0.5}, `subsample` ∈ {0.5, 0.7}, `colsample_bytree` ∈ {0.7, 0.9}, `tree_method=hist` |
+
+The grid search evaluates all combinations (3 × 3 × 3 × 2 × 2 = 108 combinations) using 5-fold cross-validation scored by Pearson correlation coefficient. The fixed-run XGBoost uses the default hyperparameters listed above without searching.
+
+### Best XGBoost Hyperparameters (Grid Search Result)
+
+Both the Δexpr + FP and Δexpr + duration variants selected the same best configuration:
+
+| Hyperparameter | Best Value |
+|---|---|
+| `n_estimators` | 300 |
+| `max_depth` | 6 |
+| `learning_rate` | 0.1 |
+| `subsample` | 0.7 |
+| `colsample_bytree` | 0.7 |
+
+Note that `n_estimators=300` is the upper bound of the search range, suggesting performance may improve further with more trees.
 
 ## Citations
 
