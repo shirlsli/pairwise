@@ -291,6 +291,19 @@ Median Pos P@20: 0.0955
 Mean Neg P@20: 0.0594 ± 0.0135
 Median Neg P@20: 0.0615
 
+### Results For Zero-Shot Cell-Line Generalization (Job 2887228)
+
+![Training loss curves and test metrics across all 5 folds](../pairwise/sequential_drug_prediction/training_summary_2887228.png)
+
+| Fold | Stopped Epoch | PCC (mean ± std) | Spearman (mean ± std) | R² (mean ± std) | RMSE | Prec@20 Up | Prec@20 Down |
+|---|---|---|---|---|---|---|---|
+| 0 | 76 | 0.0745 ± 0.1997 | 0.0634 ± 0.1919 | -0.2492 ± 0.3375 | 0.7624 | 0.0949 ± 0.0936 | 0.0555 ± 0.0666 |
+| 1 | 25 | 0.0895 ± 0.1169 | 0.0799 ± 0.1198 | -0.1939 ± 0.2534 | 0.7435 | 0.0604 ± 0.0562 | 0.0360 ± 0.0432 |
+| 2 | 43 | 0.1487 ± 0.1804 | 0.1424 ± 0.1832 | -0.0975 ± 0.1806 | 0.7368 | 0.0902 ± 0.0735 | 0.0757 ± 0.0661 |
+| 3 | 38 | 0.1350 ± 0.2269 | 0.1301 ± 0.2121 | -0.1460 ± 0.2259 | 0.8367 | 0.1097 ± 0.1012 | 0.0465 ± 0.0491 |
+| 4 | 25 | 0.0715 ± 0.1312 | 0.0619 ± 0.1338 | -0.2257 ± 0.2936 | 0.8490 | 0.0630 ± 0.0610 | 0.0302 ± 0.0409 |
+| **Mean** | | **0.1038 ± 0.0357** | **0.0955 ± 0.0381** | **-0.1825 ± 0.0612** | **0.7857 ± 0.0532** | **0.0836 ± 0.0213** | **0.0488 ± 0.0179** |
+
 ## Cell Viability Regression Models
 
 Two model families were trained to predict cell viability from delta expression profiles: Ridge regression and XGBoost. Both use the same feature matrix (delta expression concatenated with drug fingerprints, or delta expression + duration for gene-only variants).
