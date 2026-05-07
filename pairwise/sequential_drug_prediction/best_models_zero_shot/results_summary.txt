@@ -1,0 +1,15 @@
+==================================================
+Cross-validation results (5 folds):
+Mean PCC: 0.1039 ± 0.0319
+Median PCC: 0.0895
+Mean Spearman: 0.0955 ± 0.0341
+Median Spearman: 0.0799
+Mean R²: -0.1825 ± 0.0548
+Median R²: -0.1939
+Mean RMSE: 0.7857 ± 0.0476
+Median RMSE: 0.7624
+Mean Pos P@20: 0.0836 ± 0.0190
+Median Pos P@20: 0.0902
+Mean Neg P@20: 0.0488 ± 0.0160
+Median Neg P@20: 0.0465
+==================================================

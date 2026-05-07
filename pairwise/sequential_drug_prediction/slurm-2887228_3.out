@@ -1,0 +1,62 @@
+Loading existing folds from disk...
+Running fold 3 only
+
+==================================================
+Training fold 3
+==================================================
+Training on 57510 samples...
+Epoch 1/200 - Train Loss: 1.1076 - Val Loss: 1.1268 - LR: 9.14e-05
+Epoch 2/200 - Train Loss: 0.9477 - Val Loss: 1.1002 - LR: 1.83e-04
+Epoch 3/200 - Train Loss: 0.8605 - Val Loss: 1.0413 - LR: 2.74e-04
+Epoch 4/200 - Train Loss: 0.8005 - Val Loss: 1.0321 - LR: 3.66e-04
+Epoch 5/200 - Train Loss: 0.7595 - Val Loss: 1.0332 - LR: 4.57e-04
+Epoch 6/200 - Train Loss: 0.7237 - Val Loss: 1.0297 - LR: 5.49e-04
+Epoch 7/200 - Train Loss: 0.6957 - Val Loss: 1.0319 - LR: 6.40e-04
+Epoch 8/200 - Train Loss: 0.6702 - Val Loss: 1.0297 - LR: 7.31e-04
+Epoch 9/200 - Train Loss: 0.6478 - Val Loss: 1.0272 - LR: 8.23e-04
+Epoch 10/200 - Train Loss: 0.6305 - Val Loss: 1.0239 - LR: 9.14e-04
+Epoch 11/200 - Train Loss: 0.6144 - Val Loss: 1.0354 - LR: 1.01e-03
+Epoch 12/200 - Train Loss: 0.5990 - Val Loss: 1.0317 - LR: 1.10e-03
+Epoch 13/200 - Train Loss: 0.5831 - Val Loss: 1.0412 - LR: 1.19e-03
+Epoch 14/200 - Train Loss: 0.5666 - Val Loss: 1.0275 - LR: 1.28e-03
+Epoch 15/200 - Train Loss: 0.5523 - Val Loss: 1.0221 - LR: 1.37e-03
+Epoch 16/200 - Train Loss: 0.5402 - Val Loss: 1.0284 - LR: 1.46e-03
+Epoch 17/200 - Train Loss: 0.5288 - Val Loss: 1.0195 - LR: 1.55e-03
+Epoch 18/200 - Train Loss: 0.5180 - Val Loss: 1.0004 - LR: 1.65e-03
+Epoch 19/200 - Train Loss: 0.5050 - Val Loss: 1.0268 - LR: 1.74e-03
+Epoch 20/200 - Train Loss: 0.4946 - Val Loss: 1.0309 - LR: 1.83e-03
+Epoch 21/200 - Train Loss: 0.4862 - Val Loss: 1.0220 - LR: 1.92e-03
+Epoch 22/200 - Train Loss: 0.4836 - Val Loss: 1.0328 - LR: 2.01e-03
+Epoch 23/200 - Train Loss: 0.4818 - Val Loss: 1.0255 - LR: 2.10e-03
+Epoch 24/200 - Train Loss: 0.4778 - Val Loss: 1.0258 - LR: 2.19e-03
+Epoch 25/200 - Train Loss: 0.4929 - Val Loss: 1.0219 - LR: 2.29e-03
+Epoch 26/200 - Train Loss: 0.4745 - Val Loss: 1.0318 - LR: 2.38e-03
+Epoch 27/200 - Train Loss: 0.4607 - Val Loss: 1.0317 - LR: 2.47e-03
+Epoch 28/200 - Train Loss: 0.4529 - Val Loss: 1.0069 - LR: 2.56e-03
+Epoch 29/200 - Train Loss: 0.4421 - Val Loss: 1.0229 - LR: 2.65e-03
+Epoch 30/200 - Train Loss: 0.4339 - Val Loss: 1.0304 - LR: 2.74e-03
+Epoch 31/200 - Train Loss: 0.4291 - Val Loss: 1.0140 - LR: 2.83e-03
+Epoch 32/200 - Train Loss: 0.4250 - Val Loss: 1.0268 - LR: 2.93e-03
+Epoch 33/200 - Train Loss: 0.4201 - Val Loss: 1.0330 - LR: 3.02e-03
+Epoch 34/200 - Train Loss: 0.4177 - Val Loss: 1.0243 - LR: 3.11e-03
+Epoch 35/200 - Train Loss: 0.4112 - Val Loss: 1.0211 - LR: 3.20e-03
+Epoch 36/200 - Train Loss: 0.4063 - Val Loss: 1.0262 - LR: 3.29e-03
+Epoch 37/200 - Train Loss: 0.4061 - Val Loss: 1.0117 - LR: 3.38e-03
+Epoch 38/200 - Train Loss: 0.3999 - Val Loss: 1.0223 - LR: 3.47e-03
+Early stopping at epoch 38
+/athena/cayuga_0019/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/pipeline.py:163: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  model.load_state_dict(torch.load(model_path, map_location=device))
+Mean PCC: 0.1350 ± 0.2269
+Median PCC: 0.1070
+Mean Spearman: 0.1301 ± 0.2121
+Mean R²: -0.1460 ± 0.2259
+RMSE: 0.8367
+Mean Most Upregulated 20 Genes: 0.1097 ± 0.1012
+Mean Most Downregulated 20 Genes: 0.0465 ± 0.0491
+Fold 3 test PCC: 0.1350 ± 0.2269
+Fold 3 test Spearman: 0.1301 ± 0.2121
+Fold 3 test R²: -0.1460 ± 0.2259
+Fold 3 test RMSE: 0.8367
+Fold 3 test Most Upregulated 20 Genes Precision@20:   0.1097 ± 0.1012
+Fold 3 test Most Downregulated 20 Genes Precision@20: 0.0465 ± 0.0491
+Saved fold 3 results to /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_zero_shot/results_fold_3.pkl

@@ -1,0 +1,49 @@
+Loading existing folds from disk...
+Running fold 4 only
+
+==================================================
+Training fold 4
+==================================================
+Training on 45940 samples...
+Epoch 1/200 - Train Loss: 1.0377 - Val Loss: 1.0947 - LR: 9.14e-05
+Epoch 2/200 - Train Loss: 0.9226 - Val Loss: 1.0710 - LR: 1.83e-04
+Epoch 3/200 - Train Loss: 0.8402 - Val Loss: 1.0306 - LR: 2.74e-04
+Epoch 4/200 - Train Loss: 0.7761 - Val Loss: 1.0084 - LR: 3.66e-04
+Epoch 5/200 - Train Loss: 0.7355 - Val Loss: 0.9996 - LR: 4.57e-04
+Epoch 6/200 - Train Loss: 0.7024 - Val Loss: 1.0001 - LR: 5.49e-04
+Epoch 7/200 - Train Loss: 0.6747 - Val Loss: 1.0027 - LR: 6.40e-04
+Epoch 8/200 - Train Loss: 0.6500 - Val Loss: 1.0145 - LR: 7.31e-04
+Epoch 9/200 - Train Loss: 0.6271 - Val Loss: 1.0155 - LR: 8.23e-04
+Epoch 10/200 - Train Loss: 0.6069 - Val Loss: 1.0156 - LR: 9.14e-04
+Epoch 11/200 - Train Loss: 0.5924 - Val Loss: 1.0180 - LR: 1.01e-03
+Epoch 12/200 - Train Loss: 0.5797 - Val Loss: 1.0193 - LR: 1.10e-03
+Epoch 13/200 - Train Loss: 0.5679 - Val Loss: 1.0216 - LR: 1.19e-03
+Epoch 14/200 - Train Loss: 0.5565 - Val Loss: 1.0108 - LR: 1.28e-03
+Epoch 15/200 - Train Loss: 0.5471 - Val Loss: 1.0155 - LR: 1.37e-03
+Epoch 16/200 - Train Loss: 0.5363 - Val Loss: 1.0207 - LR: 1.46e-03
+Epoch 17/200 - Train Loss: 0.5276 - Val Loss: 1.0314 - LR: 1.55e-03
+Epoch 18/200 - Train Loss: 0.5170 - Val Loss: 1.0235 - LR: 1.65e-03
+Epoch 19/200 - Train Loss: 0.5066 - Val Loss: 1.0134 - LR: 1.74e-03
+Epoch 20/200 - Train Loss: 0.4983 - Val Loss: 1.0084 - LR: 1.83e-03
+Epoch 21/200 - Train Loss: 0.4909 - Val Loss: 1.0089 - LR: 1.92e-03
+Epoch 22/200 - Train Loss: 0.4823 - Val Loss: 1.0320 - LR: 2.01e-03
+Epoch 23/200 - Train Loss: 0.4725 - Val Loss: 1.0327 - LR: 2.10e-03
+Epoch 24/200 - Train Loss: 0.4676 - Val Loss: 1.0234 - LR: 2.19e-03
+Epoch 25/200 - Train Loss: 0.4632 - Val Loss: 1.0307 - LR: 2.29e-03
+Early stopping at epoch 25
+/athena/cayuga_0019/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/pipeline.py:163: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  model.load_state_dict(torch.load(model_path, map_location=device))
+Mean PCC: 0.0715 ± 0.1312
+Median PCC: 0.0656
+Mean Spearman: 0.0619 ± 0.1338
+Mean R²: -0.2257 ± 0.2936
+RMSE: 0.8490
+Mean Most Upregulated 20 Genes: 0.0630 ± 0.0610
+Mean Most Downregulated 20 Genes: 0.0302 ± 0.0409
+Fold 4 test PCC: 0.0715 ± 0.1312
+Fold 4 test Spearman: 0.0619 ± 0.1338
+Fold 4 test R²: -0.2257 ± 0.2936
+Fold 4 test RMSE: 0.8490
+Fold 4 test Most Upregulated 20 Genes Precision@20:   0.0630 ± 0.0610
+Fold 4 test Most Downregulated 20 Genes Precision@20: 0.0302 ± 0.0409
+Saved fold 4 results to /athena/angsd/scratch/ssl4003/sequential_drug_combination/pairwise/pairwise/sequential_drug_prediction/best_models_zero_shot/results_fold_4.pkl
